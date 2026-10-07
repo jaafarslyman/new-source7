@@ -5,9 +5,10 @@ import {
   UserRound, Users, Wrench, X, Zap,
 } from 'lucide-react';
 import {
-  propertyAddress, propertyStatusLabel, propertyTypeLabel, type Property,
+  propertyAddress, propertyCategoryLabel, propertyStatusLabel, propertyTypeLabel, type Property,
 } from '@/lib/propertiesTypes';
 import type { Contact, ContactPropertyRelationship } from '@/lib/contactsTypes';
+import type { Unit } from '@/lib/unitsTypes';
 import { supabase } from '@/lib/supabase';
 import { ageLabel, requestPriorityLabel, requestStatusLabel, type RequestRecord } from '@/lib/requestsTypes';
 
@@ -57,7 +58,7 @@ function PropertyIssues({ propertyId }: { propertyId: string }) {
 }
 
 function PropertyOwners({ property, contacts, ownerships }: { property: Property; contacts: Contact[]; ownerships: ContactPropertyRelationship[] }) {
-  const linked = ownerships.filter((relationship) => relationship.property_id === property.id);
+  const linked = ownerships.filter((relationship) => relationship.property_id === property.id && !relationship.unit_id && relationship.relationship_type === 'owner');
   return <section className="mt-4 rounded-[14px] border border-[#e9e6e1] bg-white p-5">
     <div className="mb-3 flex items-center justify-between"><div><h3 className="text-[13px] font-semibold text-[#302d28]">Owners</h3><p className="mt-1 text-[11px] text-[#9a958d]">Contacts who own this property.</p></div><Users size={16} className="text-[#aaa59d]" /></div>
     {linked.length === 0 ? <p className="rounded-[10px] border border-dashed border-[#d9d5ce] px-4 py-6 text-center text-[11px] text-[#97928a]">No owners linked to this property.</p> : <div className="space-y-2">{linked.map((relationship) => {
@@ -74,12 +75,20 @@ interface PropertyProfileModalProps {
   property: Property;
   contacts: Contact[];
   ownerships: ContactPropertyRelationship[];
+  units: Unit[];
   onClose: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }
 
-export default function PropertyProfileModal({ property, contacts, ownerships, onClose, onEdit, onDelete }: PropertyProfileModalProps) {
+export default function PropertyProfileModal({ property, contacts, ownerships, units, onClose, onEdit, onDelete }: PropertyProfileModalProps) {
+  const propertyUnits = units.filter((unit) => unit.property_id === property.id);
+  const isSingleHome = property.property_type === 'single_family_home';
+  const totalUnits = isSingleHome ? 1 : property.units_count;
+  const occupiedUnits = isSingleHome ? Number(Boolean(property.is_rented)) : propertyUnits.filter((unit) => unit.status === 'occupied').length;
+  const vacantUnits = isSingleHome ? Number(!property.is_rented) : propertyUnits.filter((unit) => unit.status === 'vacant').length;
+  const propertyRenter = ownerships.find((relationship) => relationship.property_id === property.id && !relationship.unit_id && relationship.relationship_type === 'tenant' && !relationship.end_date);
+  const renterName = contacts.find((contact) => String(contact.id) === String(propertyRenter?.contact_id))?.name;
   return (
     <AnimatePresence>
       <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">

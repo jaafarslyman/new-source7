@@ -8,6 +8,8 @@ export interface Unit {
   unit_type: string | null;
   description: string | null;
   floor: number | null;
+  floor_count: number | null;
+  room_count: number | null;
   bedrooms: number | null;
   bathrooms: number | null;
   square_footage: number | null;
@@ -16,8 +18,11 @@ export interface Unit {
   rent_due_day: number | null;
   lease_start_date: string | null;
   lease_end_date: string | null;
+  lease_term_type: 'fixed' | 'until_termination' | null;
   status: string | null;
   amenities: string | null;
+  facilities: string[] | null;
+  custom_facilities: string[] | null;
   utilities_information: string | null;
   parking_information: string | null;
   access_information: string | null;
@@ -57,6 +62,8 @@ export const blankUnit: UnitDraft = {
   unit_type: 'apartment',
   description: '',
   floor: null,
+  floor_count: null,
+  room_count: null,
   bedrooms: null,
   bathrooms: null,
   square_footage: null,
@@ -65,8 +72,11 @@ export const blankUnit: UnitDraft = {
   rent_due_day: 1,
   lease_start_date: null,
   lease_end_date: null,
+  lease_term_type: null,
   status: 'vacant',
   amenities: '',
+  facilities: [],
+  custom_facilities: [],
   utilities_information: '',
   parking_information: '',
   access_information: '',

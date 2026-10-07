@@ -1,101 +1,138 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertCircle, DoorOpen, Loader2, Pencil, Plus, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { AlertCircle, Check, DoorOpen, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import FlowPointSelect from '@/components/FlowPointSelect';
 import {
-  propertyAddress,
+  HOME_FACILITIES,
+  propertyTypeLabel,
   type Property,
 } from '@/lib/propertiesTypes';
 import {
-  blankUnit,
   formatMoney,
   type Unit,
   type UnitDraft,
-  UNIT_TYPES,
-  unitTypeLabel,
 } from '@/lib/unitsTypes';
 import type { Contact, ContactPropertyRelationship } from '@/lib/contactsTypes';
+import type { PropertyOwnerDraft, PropertyRenterDraft } from '@/components/properties/PropertySetupForm';
 
-const inputClass = 'w-full h-[39px] rounded-[9px] border border-[#e4e2de] bg-white px-[11px] text-[13px] text-[#151412] outline-none placeholder:text-[#b3b0aa] focus:border-[#151412] focus:ring-2 focus:ring-[#151412]/8 transition-all';
-const textAreaClass = 'w-full rounded-[9px] border border-[#e4e2de] bg-white px-[11px] py-[9px] text-[13px] leading-[1.5] text-[#151412] outline-none placeholder:text-[#b3b0aa] focus:border-[#151412] focus:ring-2 focus:ring-[#151412]/8 transition-all resize-none';
+const inputClass = 'h-10 w-full rounded-[9px] border border-[#e4e2de] bg-white px-3 text-[12px] text-[#24211e] outline-none transition-colors placeholder:text-[#b3afa8] focus:border-[#587b70] focus:ring-2 focus:ring-[#587b70]/10 disabled:cursor-not-allowed disabled:bg-[#f5f3f0]';
 
-function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
-  return <label className="block"><span className="mb-[5px] block text-[10px] font-semibold uppercase tracking-[.08em] text-[#77736d]">{label}{hint && <span className="ml-1 normal-case font-normal tracking-normal text-[#aaa59d]">{hint}</span>}</span>{children}</label>;
+export interface UnitSavePayload {
+  draft: UnitDraft;
+  owners: PropertyOwnerDraft[];
+  renter: PropertyRenterDraft | null;
+}
+
+function Field({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) {
+  return <label className="block min-w-0"><span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[.08em] text-[#77736d]">{label}{required && <span className="ml-1 text-[#b24d40]">*</span>}</span>{children}</label>;
 }
 
 function FormError({ message }: { message?: string }) {
-  return message ? <p className="mt-1 flex items-center gap-1 text-[11px] text-[#b33d32]"><AlertCircle size={11} />{message}</p> : null;
+  return message ? <p className="mt-1.5 flex items-start gap-1.5 text-[10px] leading-4 text-[#a33e34]"><AlertCircle size={11} className="mt-0.5 shrink-0" />{message}</p> : null;
 }
 
-function Modal({ children, onClose, wide = false }: { children: React.ReactNode; onClose: () => void; wide?: boolean }) {
-  return <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-5"><motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-[#171511]/30 backdrop-blur-[2px]" /><motion.div initial={{ opacity: 0, y: 10, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: .98 }} className={`relative max-h-[94vh] w-full overflow-hidden rounded-[16px] border border-[#e4e2de] bg-[#fbfaf8] shadow-[0_24px_80px_rgba(25,22,18,.18)] ${wide ? 'max-w-[820px]' : 'max-w-[520px]'}`} onClick={(event) => event.stopPropagation()}>{children}</motion.div></div>;
+function blankOwner(): PropertyOwnerDraft {
+  return { source: 'new', contact_id: '', entity_type: 'individual', name: '', email: '', phone: '', ownership_percentage: '', ownership_scope: '' };
 }
 
-type ContactSelection = {
-  mode: 'existing' | 'new';
-  contact_id: string;
-  name: string;
-  email: string;
-  phone: string;
-  contact_type: 'property_owner' | 'company' | 'tenant';
-  inherited?: boolean;
-};
-
-export type UnitSavePayload = {
-  draft: UnitDraft;
-  owner: ContactSelection | null;
-  renter: ContactSelection | null;
-};
-
-function emptySelection(contactType: ContactSelection['contact_type']): ContactSelection {
-  return { mode: 'existing', contact_id: '', name: '', email: '', phone: '', contact_type: contactType };
+function blankRenter(): PropertyRenterDraft {
+  return { source: 'new', contact_id: '', name: '', email: '', phone: '', monthly_rent: '', lease_term_type: 'fixed', lease_start_date: '', lease_end_date: '' };
 }
 
-function unitDraftFromUnit(unit: Unit): UnitDraft {
+function relationshipOwnerDraft(relationship: ContactPropertyRelationship, contact?: Contact): PropertyOwnerDraft {
   return {
-    property_id: unit.property_id,
-    unit_number: unit.unit_number ?? '',
-    unit_type: unit.unit_type ?? blankUnit.unit_type,
-    description: unit.description ?? '',
-    floor: unit.floor,
-    bedrooms: unit.bedrooms,
-    bathrooms: unit.bathrooms,
-    square_footage: unit.square_footage,
-    monthly_rent: unit.monthly_rent,
-    security_deposit: unit.security_deposit,
-    rent_due_day: unit.rent_due_day,
-    lease_start_date: unit.lease_start_date,
-    lease_end_date: unit.lease_end_date,
-    status: unit.status ?? blankUnit.status,
-    amenities: unit.amenities ?? '',
-    utilities_information: unit.utilities_information ?? '',
-    parking_information: unit.parking_information ?? '',
-    access_information: unit.access_information ?? '',
-    rules: unit.rules ?? '',
-    notes: unit.notes ?? '',
+    id: relationship.id,
+    source: 'existing',
+    contact_id: String(relationship.contact_id),
+    entity_type: contact?.contact_type === 'company' ? 'company' : 'individual',
+    name: contact?.name ?? '',
+    email: contact?.email ?? '',
+    phone: contact?.phone ?? '',
+    ownership_percentage: relationship.ownership_percentage == null ? '' : String(relationship.ownership_percentage),
+    ownership_scope: relationship.ownership_scope ?? '',
   };
 }
 
-function scopeMatchesUnit(scope: string | null | undefined, unitNumber: string) {
-  if (!scope || !unitNumber.trim()) return false;
-  const normalizedUnit = unitNumber.trim().toLowerCase();
-  const normalizedScope = scope.toLowerCase();
-  if (normalizedScope.includes(normalizedUnit) && /\d/.test(normalizedUnit)) return true;
-  const numeric = Number(normalizedUnit);
-  if (Number.isNaN(numeric)) return false;
-  const ranges: string[] = normalizedScope.match(/\d+\s*(?:-|–|—|to)\s*\d+/g) ?? [];
-  if (ranges.some((range) => {
-    const [start, end] = range.split(/-|–|—|to/).map((value) => Number(value.trim()));
-    return numeric >= start && numeric <= end;
-  })) return true;
-  const numbers: string[] = normalizedScope.match(/\d+/g) ?? [];
-  return numbers.includes(String(numeric));
+function relationshipRenterDraft(relationship: ContactPropertyRelationship | undefined, contact?: Contact, unit?: Unit | null): PropertyRenterDraft {
+  return {
+    ...blankRenter(),
+    source: relationship ? 'existing' : 'new',
+    contact_id: relationship ? String(relationship.contact_id) : '',
+    name: contact?.name ?? '',
+    email: contact?.email ?? '',
+    phone: contact?.phone ?? '',
+    monthly_rent: unit?.monthly_rent == null ? '' : String(unit.monthly_rent),
+    lease_term_type: unit?.lease_term_type ?? 'fixed',
+    lease_start_date: unit?.lease_start_date ?? relationship?.start_date ?? '',
+    lease_end_date: unit?.lease_end_date ?? relationship?.end_date ?? '',
+  };
 }
 
-function StatusPill({ status }: { status: string | null | undefined }) {
-  const label = status === 'occupied' ? 'Rented' : status === 'vacant' ? 'Not rented' : status ? status[0].toUpperCase() + status.slice(1) : 'Unavailable';
-  const tone = status === 'occupied' ? 'bg-[#edf7ef] text-[#327443] border-[#d6ecd9]' : status === 'vacant' ? 'bg-[#eef5fb] text-[#39709c] border-[#d3e4f2]' : 'bg-[#f1f0ee] text-[#77736d] border-[#e1dfda]';
-  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tone}`}>{label}</span>;
+function scopeIncludesUnit(scope: string | null | undefined, unitNumber: string) {
+  const number = Number(unitNumber.trim());
+  if (!scope || !Number.isInteger(number) || number < 0) return false;
+  return scope.split(',').some((part) => {
+    const token = part.trim();
+    const range = token.match(/^(\d+)\s*(?:-|–|—|to)\s*(\d+)$/i);
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      return number >= Math.min(start, end) && number <= Math.max(start, end);
+    }
+    return /^\d+$/.test(token) && Number(token) === number;
+  });
+}
+
+function ContactEditor({
+  row,
+  index,
+  kind,
+  contacts,
+  entityType,
+  onChange,
+}: {
+  row: PropertyOwnerDraft | PropertyRenterDraft;
+  index: number;
+  kind: 'owner' | 'renter';
+  contacts: Contact[];
+  entityType?: PropertyOwnerDraft['entity_type'];
+  onChange: (patch: Partial<PropertyOwnerDraft> | Partial<PropertyRenterDraft>) => void;
+}) {
+  const options = contacts.filter((contact) => {
+    if (kind === 'owner') {
+      return entityType === 'company'
+        ? contact.contact_type === 'company' || String(contact.id) === row.contact_id
+        : contact.contact_type !== 'company' || String(contact.id) === row.contact_id;
+    }
+    return ['tenant', 'former_tenant', 'other'].includes(contact.contact_type ?? '') || String(contact.id) === row.contact_id;
+  });
+  return <div>
+    <div className="mb-2 flex rounded-[8px] bg-[#f2f1ed] p-1" role="group" aria-label={`${kind} contact source`}>
+      <button type="button" data-testid={`button-unit-${kind}-${index}-existing`} onClick={() => onChange({ source: 'existing', contact_id: '', name: '', email: '', phone: '' })} className={`flex-1 rounded-[6px] px-2 py-1.5 text-[10px] font-semibold ${row.source === 'existing' ? 'bg-white text-[#34332e] shadow-sm' : 'text-[#89867e]'}`}>Existing contact</button>
+      <button type="button" data-testid={`button-unit-${kind}-${index}-new`} onClick={() => onChange({ source: 'new', contact_id: '', name: '', email: '', phone: '' })} className={`flex-1 rounded-[6px] px-2 py-1.5 text-[10px] font-semibold ${row.source === 'new' ? 'bg-white text-[#34332e] shadow-sm' : 'text-[#89867e]'}`}>New contact</button>
+    </div>
+    {row.source === 'existing' ? (
+      <Field label={kind === 'owner' ? 'Owner' : 'Renter'} required>
+        <FlowPointSelect
+          testId={`select-unit-${kind}-${index}-contact`}
+          value={row.contact_id}
+          onChange={(value) => {
+            const contact = contacts.find((item) => String(item.id) === value);
+            onChange({ contact_id: value, name: contact?.name ?? '', email: contact?.email ?? '', phone: contact?.phone ?? '' });
+          }}
+          placeholder={`Select ${kind}`}
+          options={options.map((contact) => ({ value: String(contact.id), label: contact.name, secondary: contact.company_name ?? contact.email ?? contact.phone ?? undefined }))}
+          emptyLabel="No matching contacts. Add a new contact instead."
+        />
+      </Field>
+    ) : (
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <Field label="Name" required><input data-testid={`input-unit-${kind}-${index}-name`} className={inputClass} value={row.name} onChange={(event) => onChange({ name: event.target.value })} placeholder="Person or company" /></Field>
+        <Field label="Email"><input data-testid={`input-unit-${kind}-${index}-email`} className={inputClass} type="email" value={row.email} onChange={(event) => onChange({ email: event.target.value })} placeholder="name@example.com" /></Field>
+        <div className="sm:col-span-2"><Field label="Phone"><input data-testid={`input-unit-${kind}-${index}-phone`} className={inputClass} type="tel" value={row.phone} onChange={(event) => onChange({ phone: event.target.value })} placeholder="Phone number" /></Field></div>
+      </div>
+    )}
+  </div>;
 }
 
 function UnitForm({
@@ -112,102 +149,269 @@ function UnitForm({
   units: Unit[];
   contacts: Contact[];
   relationships: ContactPropertyRelationship[];
-  onSave: (payload: UnitSavePayload) => Promise<void>;
+  onSave: (payload: UnitSavePayload, existingUnit: Unit | null) => Promise<void>;
   onClose: () => void;
 }) {
+  const apartmentBuilding = property.property_type === 'apartment_building';
+  const multifamily = property.property_type === 'multifamily_units';
+  const existingUnitOwners = relationships.filter((item) => item.unit_id === unit?.id && item.relationship_type === 'owner');
   const propertyOwners = relationships.filter((item) => item.property_id === property.id && item.relationship_type === 'owner' && !item.unit_id);
-  const unitOwner = relationships.find((item) => item.unit_id === unit?.id && item.relationship_type === 'owner');
-  const unitTenant = relationships.find((item) => item.unit_id === unit?.id && item.relationship_type === 'tenant' && !item.end_date);
-  const initialOwner = unitOwner ?? (propertyOwners.length === 1 ? propertyOwners[0] : undefined);
-  const ownerContact = contacts.find((contact) => String(contact.id) === String(initialOwner?.contact_id));
-  const renterContact = contacts.find((contact) => String(contact.id) === String(unitTenant?.contact_id));
-  const matchingOwner = propertyOwners.length > 1 && !unitOwner
-    ? propertyOwners.find((item) => scopeMatchesUnit(item.ownership_scope, unit?.unit_number ?? ''))
-    : undefined;
-  const scopedOwnerContact = contacts.find((contact) => String(contact.id) === String(matchingOwner?.contact_id));
-  const [form, setForm] = useState<UnitDraft>(() => unit ? unitDraftFromUnit(unit) : { ...blankUnit, property_id: property.id });
-  const [owner, setOwner] = useState<ContactSelection>(() => {
-    const contact = ownerContact ?? scopedOwnerContact;
-    return contact ? { ...emptySelection(contact.contact_type === 'company' ? 'company' : 'property_owner'), contact_id: String(contact.id), name: contact.name, inherited: true } : emptySelection('property_owner');
-  });
-  const [renter, setRenter] = useState<ContactSelection>(() => renterContact ? { ...emptySelection('tenant'), contact_id: String(renterContact.id), name: renterContact.name } : emptySelection('tenant'));
+  const activeTenant = relationships.find((item) => item.unit_id === unit?.id && item.relationship_type === 'tenant' && !item.end_date);
+  const [draft, setDraft] = useState<UnitDraft>(() => ({
+    property_id: property.id,
+    unit_number: unit?.unit_number ?? '',
+    unit_type: apartmentBuilding ? 'apartment' : 'house',
+    description: unit?.description ?? '',
+    floor: unit?.floor ?? null,
+    floor_count: unit?.floor_count ?? null,
+    room_count: unit?.room_count ?? null,
+    bedrooms: unit?.bedrooms ?? null,
+    bathrooms: unit?.bathrooms ?? null,
+    square_footage: unit?.square_footage ?? null,
+    monthly_rent: unit?.monthly_rent ?? null,
+    security_deposit: unit?.security_deposit ?? null,
+    rent_due_day: unit?.rent_due_day ?? 1,
+    lease_start_date: unit?.lease_start_date ?? null,
+    lease_end_date: unit?.lease_end_date ?? null,
+    lease_term_type: unit?.lease_term_type ?? null,
+    status: unit?.status ?? 'vacant',
+    amenities: unit?.amenities ?? '',
+    facilities: unit?.facilities ?? [],
+    custom_facilities: unit?.custom_facilities ?? [],
+    utilities_information: unit?.utilities_information ?? '',
+    parking_information: unit?.parking_information ?? '',
+    access_information: unit?.access_information ?? '',
+    rules: unit?.rules ?? '',
+    notes: unit?.notes ?? '',
+  }));
+  const [owners, setOwners] = useState<PropertyOwnerDraft[]>(() => multifamily
+    ? existingUnitOwners.length
+      ? existingUnitOwners.map((relationship) => relationshipOwnerDraft(relationship, contacts.find((contact) => String(contact.id) === String(relationship.contact_id))))
+      : [blankOwner()]
+    : []);
+  const [renter, setRenter] = useState<PropertyRenterDraft>(() => relationshipRenterDraft(activeTenant, contacts.find((contact) => String(contact.id) === String(activeTenant?.contact_id)), unit));
+  const [rented, setRented] = useState(unit?.status === 'occupied');
+  const [customFacility, setCustomFacility] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const set = (key: keyof UnitDraft, value: string | number | null) => setForm((current) => ({ ...current, [key]: value }));
-  const apartmentCount = units.filter((item) => item.unit_type === 'apartment' && item.id !== unit?.id).length;
-  const apartmentLimit = property.units_count;
-  const ownerOptions = contacts.filter((contact) => ['property_owner', 'company', 'former_owner', 'other'].includes(contact.contact_type ?? '') || String(contact.id) === owner.contact_id);
-  const renterOptions = contacts.filter((contact) => ['tenant', 'former_tenant', 'other'].includes(contact.contact_type ?? '') || String(contact.id) === renter.contact_id);
-  const unitTypeOptions = UNIT_TYPES.filter((type) => type.value !== 'commercial' && (type.value === 'apartment' || type.value === 'other' || type.value === form.unit_type));
+  const inheritedOwner = useMemo(() => {
+    if (!apartmentBuilding) return null;
+    const matching = propertyOwners.length === 1
+      ? propertyOwners
+      : propertyOwners.filter((owner) => scopeIncludesUnit(owner.ownership_scope, draft.unit_number));
+    return matching.length === 1 ? matching[0] : null;
+  }, [apartmentBuilding, propertyOwners, draft.unit_number]);
+  const inheritedContact = contacts.find((contact) => String(contact.id) === String(inheritedOwner?.contact_id));
+  const occupiedTotal = units.filter((item) => item.id !== unit?.id).length;
+  const duplicateUnit = units.some((item) => item.id !== unit?.id && item.unit_number.trim().toLocaleLowerCase() === draft.unit_number.trim().toLocaleLowerCase());
+  const selectedFacilities = useMemo(() => new Set(draft.facilities ?? []), [draft.facilities]);
 
-  useEffect(() => {
-    if (unit || owner.contact_id || owner.mode === 'new' || propertyOwners.length <= 1) return;
-    const matched = propertyOwners.find((item) => scopeMatchesUnit(item.ownership_scope, form.unit_number));
-    const matchedContact = contacts.find((contact) => String(contact.id) === String(matched?.contact_id));
-    if (matchedContact) setOwner((current) => ({ ...current, contact_id: String(matchedContact.id), name: matchedContact.name, contact_type: matchedContact.contact_type === 'company' ? 'company' : 'property_owner', inherited: true }));
-  }, [form.unit_number, unit, owner.contact_id, owner.mode, propertyOwners, contacts]);
+  const change = (key: keyof UnitDraft, value: string | number | null | string[]) => setDraft((current) => ({ ...current, [key]: value }));
+  const changeOwner = (index: number, patch: Partial<PropertyOwnerDraft>) => setOwners((current) => current.map((owner, i) => i === index ? { ...owner, ...patch } : owner));
+  const changeRenter = (patch: Partial<PropertyRenterDraft>) => setRenter((current) => ({ ...current, ...patch }));
+  const toggleFacility = (facility: string) => change('facilities', selectedFacilities.has(facility) ? [...selectedFacilities].filter((item) => item !== facility) : [...selectedFacilities, facility]);
+  const floorOptions = Array.from({ length: Math.max(0, property.floor_count ?? 0) }, (_, index) => ({
+    value: String(index),
+    label: index === 0 ? 'Ground floor (0)' : `Floor ${index}`,
+  }));
+  const floorCapacity = draft.floor === null ? 0 : property.floor_unit_counts?.[draft.floor] ?? 0;
+  const unitsOnFloor = units.filter((item) => item.id !== unit?.id && item.floor === draft.floor).length;
 
-  const submit = async () => {
+  const validate = () => {
     const next: Record<string, string> = {};
-    if (!form.unit_number.trim()) next.unit_number = 'Unit number or name is required';
-    if (form.unit_type === 'apartment' && apartmentLimit !== null && apartmentCount >= apartmentLimit && !unit) next.unit_type = `This property already has its ${apartmentLimit} apartments. Add a shared space instead.`;
-    if (form.floor !== null && (Number.isNaN(form.floor) || form.floor < 0)) next.floor = 'Enter zero or more';
-    if (form.bedrooms !== null && (Number.isNaN(form.bedrooms) || form.bedrooms < 0)) next.bedrooms = 'Enter zero or more';
-    if (form.bathrooms !== null && (Number.isNaN(form.bathrooms) || form.bathrooms < 0)) next.bathrooms = 'Enter zero or more';
-    if (form.square_footage !== null && (Number.isNaN(form.square_footage) || form.square_footage < 0)) next.square_footage = 'Enter zero or more';
-    if (form.monthly_rent !== null && (Number.isNaN(form.monthly_rent) || form.monthly_rent < 0)) next.monthly_rent = 'Enter zero or more';
-    if (form.security_deposit !== null && (Number.isNaN(form.security_deposit) || form.security_deposit < 0)) next.security_deposit = 'Enter zero or more';
-    if (form.rent_due_day !== null && (Number.isNaN(form.rent_due_day) || form.rent_due_day < 1 || form.rent_due_day > 31)) next.rent_due_day = 'Use a day from 1 to 31';
-    if (form.lease_start_date && form.lease_end_date && form.lease_end_date < form.lease_start_date) next.lease_end_date = 'End date must be on or after the start date';
-    if (form.status === 'occupied') {
-      if (renter.mode === 'existing' && !renter.contact_id) next.renter = 'Choose the renter contact';
-      if (renter.mode === 'new' && !renter.name.trim()) next.renter = 'Renter name is required';
-      if (renter.mode === 'new' && !renter.email.trim() && !renter.phone.trim()) next.renter = 'Add an email or phone for the renter';
+    if (!draft.unit_number.trim()) next.unit_number = 'Unit name or number is required.';
+    if (duplicateUnit) next.unit_number = 'A unit with this name already exists in the property.';
+    if (!Number.isInteger(draft.room_count) || draft.room_count === null || draft.room_count < 1) next.room_count = 'Enter a whole-number room count greater than 0.';
+    if (multifamily && (!Number.isInteger(draft.floor_count) || draft.floor_count === null || draft.floor_count < 1)) next.floor_count = 'Enter a whole-number interior floor count greater than 0.';
+    if (apartmentBuilding && (draft.floor === null || !Number.isInteger(draft.floor) || draft.floor < 0 || draft.floor >= (property.floor_count ?? 0))) next.floor = 'Choose a floor that exists in this building.';
+    if (!unit && occupiedTotal >= (property.units_count ?? 0)) next.limit = 'This property already has its configured number of units.';
+    if (apartmentBuilding && draft.floor !== null && unitsOnFloor >= floorCapacity) next.floor = `This floor already has its limit of ${floorCapacity} units.`;
+    if (multifamily) {
+      if (!owners.length) next.owners = 'Add at least one owner.';
+      const distinctContacts = new Set<string>();
+      owners.forEach((owner, index) => {
+        if (owner.source === 'existing') {
+          if (!owner.contact_id) next[`owner_${index}`] = 'Select an owner contact.';
+          if (owner.contact_id && distinctContacts.has(owner.contact_id)) next[`owner_${index}`] = 'Each owner can only be added once.';
+          if (owner.contact_id) distinctContacts.add(owner.contact_id);
+        } else {
+          if (!owner.name.trim()) next[`owner_${index}`] = 'Owner name is required.';
+          if (!owner.email.trim() && !owner.phone.trim()) next[`owner_${index}`] = 'Add an email or phone number.';
+          if (owner.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(owner.email.trim())) next[`owner_${index}`] = 'Enter a valid email.';
+        }
+        const share = Number(owner.ownership_percentage);
+        if (!owner.ownership_percentage.trim() || !Number.isFinite(share) || share <= 0 || share > 100) next[`owner_${index}`] = 'Enter an ownership share greater than 0 and no more than 100.';
+      });
+      if (owners.length && owners.every((owner) => owner.ownership_percentage.trim() && Number.isFinite(Number(owner.ownership_percentage)) && Number(owner.ownership_percentage) > 0)) {
+        const total = owners.reduce((sum, owner) => sum + Number(owner.ownership_percentage), 0);
+        if (Math.abs(total - 100) > 0.001) next.owners = `Ownership shares must total 100% (currently ${total}%).`;
+      }
+    }
+    if (apartmentBuilding && !inheritedOwner) next.inherited_owner = propertyOwners.length > 1
+      ? 'This unit number must match exactly one building owner’s unit scope.'
+      : 'Add a building owner before adding apartment units.';
+    if (rented) {
+      if (renter.source === 'existing' && !renter.contact_id) next.renter = 'Select the renter contact.';
+      if (renter.source === 'new' && !renter.name.trim()) next.renter = 'Renter name is required.';
+      if (renter.source === 'new' && !renter.email.trim() && !renter.phone.trim()) next.renter = 'Add an email or phone number.';
+      if (renter.source === 'new' && renter.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(renter.email.trim())) next.renter = 'Enter a valid email.';
+      const amount = Number(renter.monthly_rent);
+      if (!renter.monthly_rent.trim() || !Number.isFinite(amount) || amount <= 0) next.monthly_rent = 'Enter a monthly rent greater than $0.';
+      if (!renter.lease_start_date) next.lease_start_date = 'Choose a lease start date.';
+      if (renter.lease_term_type === 'fixed') {
+        if (!renter.lease_end_date) next.lease_end_date = 'Choose a lease end date.';
+        if (renter.lease_start_date && renter.lease_end_date && renter.lease_end_date < renter.lease_start_date) next.lease_end_date = 'End date must be on or after the start date.';
+      }
     }
     setErrors(next);
-    if (Object.keys(next).length) return;
+    return Object.keys(next).length === 0;
+  };
+
+  const submit = async () => {
+    if (!validate()) return;
     setSaving(true);
+    const rentedUnitDraft: UnitDraft = {
+      ...draft,
+      property_id: property.id,
+      unit_number: draft.unit_number.trim(),
+      unit_type: apartmentBuilding ? 'apartment' : 'house',
+      floor: apartmentBuilding ? draft.floor : null,
+      floor_count: multifamily ? Number(draft.floor_count) : null,
+      room_count: Number(draft.room_count),
+      facilities: (draft.facilities ?? []).filter(Boolean),
+      custom_facilities: (draft.custom_facilities ?? []).filter(Boolean),
+      status: rented ? 'occupied' : 'vacant',
+      monthly_rent: rented ? Number(renter.monthly_rent) : null,
+      lease_term_type: rented ? renter.lease_term_type : null,
+      lease_start_date: rented ? renter.lease_start_date : null,
+      lease_end_date: rented && renter.lease_term_type === 'fixed' ? renter.lease_end_date : null,
+      security_deposit: null,
+      rent_due_day: 1,
+    };
+    const ownerRows = multifamily ? owners.map((owner) => ({
+      ...owner,
+      name: owner.name.trim(),
+      email: owner.email.trim(),
+      phone: owner.phone.trim(),
+      ownership_percentage: owner.ownership_percentage.trim(),
+      ownership_scope: '',
+    })) : [];
+    const renterRow = rented ? {
+      ...renter,
+      name: renter.name.trim(),
+      email: renter.email.trim(),
+      phone: renter.phone.trim(),
+      monthly_rent: renter.monthly_rent.trim(),
+    } : null;
     try {
-      await onSave({
-        draft: { ...form, unit_number: form.unit_number.trim(), description: form.description?.trim() || null, amenities: form.amenities?.trim() || null, utilities_information: form.utilities_information?.trim() || null, parking_information: form.parking_information?.trim() || null, access_information: form.access_information?.trim() || null, rules: form.rules?.trim() || null, notes: form.notes?.trim() || null, lease_start_date: form.lease_start_date || null, lease_end_date: form.lease_end_date || null },
-        owner: owner.contact_id || owner.mode === 'new' && owner.name.trim() ? owner : null,
-        renter: form.status === 'occupied' ? renter : null,
-      });
+      await onSave({ draft: rentedUnitDraft, owners: ownerRows, renter: renterRow }, unit);
       onClose();
     } catch (error) {
-      setErrors({ form: error instanceof Error ? error.message : 'Unable to save unit' });
+      setErrors({ form: error instanceof Error ? error.message : 'Unable to save this unit.' });
       setSaving(false);
     }
   };
 
-  return <Modal onClose={onClose} wide>
-    <div className="flex items-center justify-between border-b border-[#ebe8e3] px-5 py-4"><div><p className="text-[15px] font-semibold text-[#151412]">{unit ? 'Edit unit' : 'Add unit'} in {property.name}</p><p className="mt-1 text-[11px] text-[#8b877f]">Owners, rental state, and lease details stay connected to this unit.</p></div><button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-full border border-[#e4e2de] text-[#817d76]"><X size={14} /></button></div>
-    <div className="max-h-[calc(94vh-72px)] overflow-y-auto px-5 py-5">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Unit number / name"><input autoFocus className={inputClass} value={form.unit_number} onChange={(event) => set('unit_number', event.target.value)} placeholder="e.g. 3 or Gym" /><FormError message={errors.unit_number} /></Field>
-        <Field label="Unit type"><FlowPointSelect value={form.unit_type ?? ''} onChange={(value) => set('unit_type', value)} placeholder="Select a type" options={unitTypeOptions.map((type) => ({ value: type.value, label: type.value === 'other' ? 'Shared space / other' : type.label }))} /><FormError message={errors.unit_type} /></Field>
-        <Field label="Floor" hint="optional"><input type="number" min="0" step="1" className={inputClass} value={form.floor ?? ''} onChange={(event) => set('floor', event.target.value === '' ? null : Number(event.target.value))} placeholder="e.g. 2" /><FormError message={errors.floor} /></Field>
-        <Field label="Square footage" hint="optional"><input type="number" min="0" step="1" className={inputClass} value={form.square_footage ?? ''} onChange={(event) => set('square_footage', event.target.value === '' ? null : Number(event.target.value))} placeholder="e.g. 850" /><FormError message={errors.square_footage} /></Field>
-        <Field label="Bedrooms" hint="optional"><input type="number" min="0" step="0.5" className={inputClass} value={form.bedrooms ?? ''} onChange={(event) => set('bedrooms', event.target.value === '' ? null : Number(event.target.value))} placeholder="e.g. 2" /></Field>
-        <Field label="Bathrooms" hint="optional"><input type="number" min="0" step="0.5" className={inputClass} value={form.bathrooms ?? ''} onChange={(event) => set('bathrooms', event.target.value === '' ? null : Number(event.target.value))} placeholder="e.g. 1.5" /></Field>
-        <div className="sm:col-span-2"><Field label="Description" hint="optional"><textarea className={textAreaClass} rows={2} value={form.description ?? ''} onChange={(event) => set('description', event.target.value)} placeholder="A short description for your team" /></Field></div>
+  return <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-5">
+    <motion.button type="button" aria-label="Close unit form" data-testid="button-unit-form-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={saving ? undefined : onClose} className="absolute inset-0 cursor-default bg-[#171a17]/35 backdrop-blur-[3px]" />
+    <motion.section role="dialog" aria-modal="true" aria-labelledby="unit-form-title" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="relative flex max-h-[94dvh] w-full max-w-[760px] flex-col overflow-hidden rounded-[16px] border border-[#e6e3dd] bg-[#fbfaf8] shadow-[0_28px_90px_rgba(29,31,27,.2)]">
+      <header className="flex shrink-0 items-start justify-between border-b border-[#e9e6e0] px-5 py-4 sm:px-7">
+        <div><p className="text-[9px] font-semibold uppercase tracking-[.15em] text-[#82948a]">{propertyTypeLabel(property.property_type)}</p><h2 id="unit-form-title" data-testid="text-unit-form-title" className="mt-1 text-[16px] font-semibold text-[#282722]">{unit ? 'Edit unit' : 'Add a unit'} · {property.name}</h2><p className="mt-1 text-[11px] text-[#8d8981]">Unit details, ownership, and rental information.</p></div>
+        <button type="button" data-testid="button-close-unit-form" onClick={onClose} disabled={saving} className="flex h-8 w-8 items-center justify-center rounded-full border border-[#e5e2dc] text-[#817d75] hover:bg-[#f0eeea] disabled:opacity-50"><X size={14} /></button>
+      </header>
+
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-7">
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2"><Field label="Unit name or number" required><input autoFocus data-testid="input-unit-name" className={inputClass} value={draft.unit_number} onChange={(event) => change('unit_number', event.target.value)} placeholder="e.g. 1 or 2A" /></Field><FormError message={errors.unit_number} /></div>
+          <Field label="Rooms" required><input data-testid="input-unit-room-count" className={inputClass} type="number" min="1" step="1" value={draft.room_count ?? ''} onChange={(event) => change('room_count', event.target.value === '' ? null : Number(event.target.value))} placeholder="e.g. 4" /><FormError message={errors.room_count} /></Field>
+          {multifamily && <Field label="Interior floors" required><input data-testid="input-unit-floor-count" className={inputClass} type="number" min="1" step="1" value={draft.floor_count ?? ''} onChange={(event) => change('floor_count', event.target.value === '' ? null : Number(event.target.value))} placeholder="e.g. 2" /><FormError message={errors.floor_count} /></Field>}
+          {apartmentBuilding && <Field label="Building floor" required><FlowPointSelect testId="select-unit-building-floor" value={draft.floor === null ? '' : String(draft.floor)} onChange={(value) => change('floor', value === '' ? null : Number(value))} placeholder="Choose a floor" options={floorOptions} /><FormError message={errors.floor} /></Field>}
+          <Field label="Bedrooms" ><input data-testid="input-unit-bedrooms" className={inputClass} type="number" min="0" step="0.5" value={draft.bedrooms ?? ''} onChange={(event) => change('bedrooms', event.target.value === '' ? null : Number(event.target.value))} placeholder="Optional" /></Field>
+          <Field label="Bathrooms"><input data-testid="input-unit-bathrooms" className={inputClass} type="number" min="0" step="0.5" value={draft.bathrooms ?? ''} onChange={(event) => change('bathrooms', event.target.value === '' ? null : Number(event.target.value))} placeholder="Optional" /></Field>
+        </section>
+
+        <section className="border-t border-[#ebe8e2] pt-5" data-testid="section-unit-facilities">
+          <div className="mb-3"><p className="text-[12px] font-semibold text-[#35332e]">Unit facilities</p><p className="mt-1 text-[10px] text-[#938f86]">Shared property facilities stay on the property. Select features specific to this unit.</p></div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {HOME_FACILITIES.map((facility) => {
+              const selected = selectedFacilities.has(facility.value);
+              return <button key={facility.value} type="button" data-testid={`button-unit-facility-${facility.value}`} aria-pressed={selected} onClick={() => toggleFacility(facility.value)} className={`flex min-h-9 items-center gap-2 rounded-[8px] border px-2.5 text-left text-[10px] font-medium ${selected ? 'border-[#b9cabe] bg-[#edf4ee] text-[#4d6a59]' : 'border-[#e7e4de] bg-white text-[#69665f] hover:bg-[#f8faf7]'}`}><span className={`flex h-4 w-4 items-center justify-center rounded-[4px] border ${selected ? 'border-[#63816e] bg-[#63816e] text-white' : 'border-[#d5d2ca] bg-white'}`}>{selected && <Check size={10} />}</span>{facility.label}</button>;
+            })}
+          </div>
+          <div className="mt-3 flex gap-2"><input data-testid="input-unit-custom-facility" className={inputClass} value={customFacility} onChange={(event) => setCustomFacility(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); const value = customFacility.trim(); if (value && !draft.custom_facilities?.includes(value)) change('custom_facilities', [...(draft.custom_facilities ?? []), value]); setCustomFacility(''); } }} placeholder="Add a unit-specific facility" /><button type="button" data-testid="button-add-unit-facility" onClick={() => { const value = customFacility.trim(); if (value && !draft.custom_facilities?.includes(value)) change('custom_facilities', [...(draft.custom_facilities ?? []), value]); setCustomFacility(''); }} disabled={!customFacility.trim()} className="flex h-10 shrink-0 items-center gap-1.5 rounded-[9px] border border-[#dcd9d2] px-3 text-[10px] font-semibold text-[#66635b] hover:bg-[#f3f2ee] disabled:opacity-45"><Plus size={12} />Add</button></div>
+          {(draft.custom_facilities ?? []).length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{draft.custom_facilities?.map((facility) => <span key={facility} data-testid={`chip-unit-custom-facility-${facility}`} className="inline-flex items-center gap-1 rounded-full bg-[#eaf0e9] px-2.5 py-1 text-[10px] text-[#526d5b]">{facility}<button type="button" aria-label={`Remove ${facility}`} data-testid={`button-remove-unit-facility-${facility}`} onClick={() => change('custom_facilities', (draft.custom_facilities ?? []).filter((item) => item !== facility))}><X size={10} /></button></span>)}</div>}
+        </section>
+
+        <section className="border-t border-[#ebe8e2] pt-5" data-testid="section-unit-ownership">
+          <div className="mb-3"><p className="text-[12px] font-semibold text-[#35332e]">Ownership</p><p className="mt-1 text-[10px] text-[#938f86]">{apartmentBuilding ? 'Building owners are assigned from the unit scope and cannot be changed here.' : 'Unit ownership shares must total 100%.'}</p></div>
+          {apartmentBuilding ? (
+            <div data-testid="unit-inherited-owner" className={`rounded-[10px] border px-3.5 py-3 ${inheritedOwner ? 'border-[#dbe5dc] bg-[#f4f7f2]' : 'border-[#efd2ce] bg-[#fff7f5]'}`}>
+              <div className="flex items-center gap-2"><DoorOpen size={14} className="text-[#698373]" /><p className="text-[11px] font-semibold text-[#3f4f43]">{inheritedContact?.name ?? 'Building owner not resolved'}</p><span className="ml-auto text-[9px] font-semibold uppercase tracking-[.08em] text-[#869087]">Locked</span></div>
+              <p className="mt-1 text-[10px] text-[#89867e]">{propertyOwners.length > 1 ? `Matched to unit scope: ${inheritedOwner?.ownership_scope ?? 'No matching scope'}` : 'Inherited from sole building owner'}</p>
+              <FormError message={errors.inherited_owner} />
+            </div>
+          ) : (
+            <>
+              <div className="space-y-3">{owners.map((owner, index) => <article key={owner.id ?? index} data-testid={`card-unit-owner-${index}`} className="rounded-[10px] border border-[#e7e4de] bg-white p-3">
+                <div className="mb-2 flex items-center justify-between"><p className="text-[11px] font-semibold text-[#45443d]">Owner {index + 1}</p>{owners.length > 1 && <button type="button" data-testid={`button-remove-unit-owner-${index}`} aria-label={`Remove owner ${index + 1}`} onClick={() => setOwners((current) => current.filter((_, i) => i !== index))} className="flex h-6 w-6 items-center justify-center rounded-full text-[#938e85] hover:bg-[#fbefed] hover:text-[#a33e34]"><Trash2 size={12} /></button>}</div>
+                <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-[150px_1fr]">
+                  <Field label="Owner type" required><FlowPointSelect testId={`select-unit-owner-${index}-type`} value={owner.entity_type} onChange={(value) => changeOwner(index, { entity_type: value as PropertyOwnerDraft['entity_type'], contact_id: '', source: 'existing' })} options={[{ value: 'individual', label: 'Individual' }, { value: 'company', label: 'Company' }]} /></Field>
+                  <Field label="Share" required><div className="relative"><input data-testid={`input-unit-owner-${index}-percentage`} className={`${inputClass} pr-8`} type="number" min="0.01" max="100" step="0.01" value={owner.ownership_percentage} onChange={(event) => changeOwner(index, { ownership_percentage: event.target.value })} placeholder="e.g. 50" /><span className="absolute right-3 top-3 text-[10px] text-[#929087]">%</span></div></Field>
+                </div>
+                <ContactEditor row={owner} index={index} kind="owner" contacts={contacts} entityType={owner.entity_type} onChange={(patch) => changeOwner(index, patch as Partial<PropertyOwnerDraft>)} />
+                <FormError message={errors[`owner_${index}`]} />
+              </article>)}</div>
+              <button type="button" data-testid="button-add-unit-owner" onClick={() => setOwners((current) => [...current, blankOwner()])} className="mt-2 flex h-8 items-center gap-1.5 rounded-[8px] border border-dashed border-[#d8d5ce] px-3 text-[10px] font-semibold text-[#6f6b63] hover:bg-[#f3f6f1]"><Plus size={12} />Add another owner</button>
+              <FormError message={errors.owners} />
+            </>
+          )}
+        </section>
+
+        <section className="border-t border-[#ebe8e2] pt-5" data-testid="section-unit-rental">
+          <div className="mb-3"><p className="text-[12px] font-semibold text-[#35332e]">Rental status</p><p className="mt-1 text-[10px] text-[#938f86]">A unit can have only one active renter.</p></div>
+          <div className="grid grid-cols-2 gap-2">
+            {[{ value: false, label: 'Not rented' }, { value: true, label: 'Rented' }].map((choice) => <button key={String(choice.value)} type="button" data-testid={`button-unit-rented-${choice.value ? 'yes' : 'no'}`} aria-pressed={rented === choice.value} onClick={() => setRented(choice.value)} className={`rounded-[9px] border p-2.5 text-left text-[11px] font-semibold ${rented === choice.value ? 'border-[#97ad9b] bg-[#eff4ee] text-[#455c4b]' : 'border-[#e7e4de] bg-white text-[#6f6b63]'}`}>{choice.label}</button>)}
+          </div>
+          {rented && <div className="mt-3 rounded-[10px] border border-[#e7e4de] bg-white p-3">
+            <ContactEditor row={renter} index={0} kind="renter" contacts={contacts} onChange={(patch) => changeRenter(patch as Partial<PropertyRenterDraft>)} />
+            <FormError message={errors.renter} />
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Monthly rent (USD)" required><div className="relative"><span className="absolute left-3 top-3 text-[11px] text-[#89867e]">$</span><input data-testid="input-unit-monthly-rent" className={`${inputClass} pl-7`} type="number" min="0.01" step="0.01" value={renter.monthly_rent} onChange={(event) => changeRenter({ monthly_rent: event.target.value })} placeholder="2,450" /></div><FormError message={errors.monthly_rent} /></Field>
+              <Field label="Contract duration" required><FlowPointSelect testId="select-unit-lease-term" value={renter.lease_term_type} onChange={(value) => changeRenter({ lease_term_type: value as PropertyRenterDraft['lease_term_type'] })} options={[{ value: 'fixed', label: 'Fixed term' }, { value: 'until_termination', label: 'Until termination' }]} /></Field>
+              <Field label="Lease start date" required><input data-testid="input-unit-lease-start" className={inputClass} type="date" value={renter.lease_start_date} onChange={(event) => changeRenter({ lease_start_date: event.target.value })} /><FormError message={errors.lease_start_date} /></Field>
+              {renter.lease_term_type === 'fixed' && <Field label="Lease end date" required><input data-testid="input-unit-lease-end" className={inputClass} type="date" min={renter.lease_start_date || undefined} value={renter.lease_end_date} onChange={(event) => changeRenter({ lease_end_date: event.target.value })} /><FormError message={errors.lease_end_date} /></Field>}
+            </div>
+          </div>}
+        </section>
+
+        {(errors.limit || errors.form) && <div data-testid="error-unit-form" role="alert" className="flex items-start gap-2 rounded-[9px] border border-[#efd2ce] bg-[#fff7f5] px-3 py-2.5 text-[10px] leading-4 text-[#a33e34]"><AlertCircle size={12} className="mt-0.5 shrink-0" />{errors.form ?? errors.limit}</div>}
       </div>
+      <footer className="flex shrink-0 justify-end gap-2 border-t border-[#e9e6e0] bg-[#faf9f6] px-5 py-3.5 sm:px-7"><button type="button" data-testid="button-cancel-unit" onClick={onClose} disabled={saving} className="h-9 rounded-[9px] border border-[#e2dfd8] px-4 text-[10px] font-semibold text-[#66635c] hover:bg-[#f1efeb]">Cancel</button><button type="button" data-testid="button-save-unit" onClick={submit} disabled={saving} className="flex h-9 items-center gap-2 rounded-[9px] bg-[#55776b] px-4 text-[10px] font-semibold text-white hover:bg-[#456357] disabled:opacity-55">{saving && <Loader2 size={12} className="animate-spin" />}{unit ? 'Save unit' : 'Add unit'}</button></footer>
+    </motion.section>
+  </div>;
+}
 
-      <section className="mt-6 border-t border-[#ebe8e3] pt-5"><div className="mb-3"><p className="text-[12px] font-semibold text-[#35322e]">Ownership</p><p className="mt-1 text-[11px] text-[#9c978e]">{propertyOwners.length === 1 ? 'This owner is inherited from the property.' : 'Choose the owner for this unit, or add a new owner contact.'}</p></div>
-        <div className="flex gap-1 rounded-[8px] bg-[#f5f3f0] p-1"><button type="button" onClick={() => setOwner((current) => ({ ...current, mode: 'existing', inherited: false }))} className={`flex-1 rounded-[6px] px-2 py-1.5 text-[10px] font-semibold ${owner.mode === 'existing' ? 'bg-white text-[#35322e] shadow-sm' : 'text-[#8f8981]'}`}>Choose existing contact</button><button type="button" onClick={() => setOwner((current) => ({ ...current, mode: 'new', contact_id: '', inherited: false }))} className={`flex-1 rounded-[6px] px-2 py-1.5 text-[10px] font-semibold ${owner.mode === 'new' ? 'bg-white text-[#35322e] shadow-sm' : 'text-[#8f8981]'}`}>Add new owner contact</button></div>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">{owner.mode === 'existing' ? <Field label="Owner"><FlowPointSelect value={owner.contact_id} onChange={(value) => setOwner((current) => ({ ...current, contact_id: value, inherited: false }))} placeholder="Select owner" options={ownerOptions.map((contact) => ({ value: String(contact.id), label: contact.name, secondary: contact.company_name ?? contact.customer_id ?? contact.email ?? undefined }))} emptyLabel="No owner contacts yet. Add one instead." /></Field> : <><Field label="Owner / company name"><input className={inputClass} value={owner.name} onChange={(event) => setOwner((current) => ({ ...current, name: event.target.value, inherited: false }))} placeholder="Person or company name" /></Field><Field label="Entity type"><FlowPointSelect value={owner.contact_type} onChange={(value) => setOwner((current) => ({ ...current, contact_type: value as ContactSelection['contact_type'], inherited: false }))} placeholder="Choose entity type" options={[{ value: 'property_owner', label: 'Person' }, { value: 'company', label: 'Company' }]} /></Field><Field label="Email" hint="optional"><input type="email" className={inputClass} value={owner.email} onChange={(event) => setOwner((current) => ({ ...current, email: event.target.value, inherited: false }))} placeholder="owner@example.com" /></Field><Field label="Phone" hint="optional"><input className={inputClass} value={owner.phone} onChange={(event) => setOwner((current) => ({ ...current, phone: event.target.value, inherited: false }))} placeholder="Phone number" /></Field></>}</div>
-        <FormError message={errors.owner} />
-      </section>
-
-      <section className="mt-6 border-t border-[#ebe8e3] pt-5"><div className="mb-3"><p className="text-[12px] font-semibold text-[#35322e]">Rental status</p><p className="mt-1 text-[11px] text-[#9c978e]">Rented units require the renter and current lease window.</p></div><Field label="Status"><FlowPointSelect value={form.status ?? ''} onChange={(value) => set('status', value)} options={[{ value: 'vacant', label: 'Not rented' }, { value: 'occupied', label: 'Rented' }, { value: 'maintenance', label: 'Maintenance' }, { value: 'unavailable', label: 'Unavailable' }]} placeholder="Choose a status" /></Field>
-        {form.status === 'occupied' && <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2"><div className="sm:col-span-2"><div className="flex gap-1 rounded-[8px] bg-[#f5f3f0] p-1"><button type="button" onClick={() => setRenter((current) => ({ ...current, mode: 'existing' }))} className={`flex-1 rounded-[6px] px-2 py-1.5 text-[10px] font-semibold ${renter.mode === 'existing' ? 'bg-white text-[#35322e] shadow-sm' : 'text-[#8f8981]'}`}>Choose existing renter</button><button type="button" onClick={() => setRenter((current) => ({ ...current, mode: 'new', contact_id: '' }))} className={`flex-1 rounded-[6px] px-2 py-1.5 text-[10px] font-semibold ${renter.mode === 'new' ? 'bg-white text-[#35322e] shadow-sm' : 'text-[#8f8981]'}`}>Add new renter contact</button></div></div>{renter.mode === 'existing' ? <Field label="Renter"><FlowPointSelect value={renter.contact_id} onChange={(value) => setRenter((current) => ({ ...current, contact_id: value }))} placeholder="Select renter" options={renterOptions.map((contact) => ({ value: String(contact.id), label: contact.name, secondary: contact.customer_id ?? contact.email ?? contact.phone ?? undefined }))} emptyLabel="No renter contacts yet. Add one instead." /></Field> : <><Field label="Renter name"><input className={inputClass} value={renter.name} onChange={(event) => setRenter((current) => ({ ...current, name: event.target.value }))} placeholder="Full name" /></Field><Field label="Email" hint="optional"><input type="email" className={inputClass} value={renter.email} onChange={(event) => setRenter((current) => ({ ...current, email: event.target.value }))} placeholder="renter@example.com" /></Field><Field label="Phone" hint="optional"><input className={inputClass} value={renter.phone} onChange={(event) => setRenter((current) => ({ ...current, phone: event.target.value }))} placeholder="Phone number" /></Field></>}<Field label="Monthly rent"><input type="number" min="0" step="0.01" className={inputClass} value={form.monthly_rent ?? ''} onChange={(event) => set('monthly_rent', event.target.value === '' ? null : Number(event.target.value))} placeholder="0.00" /><FormError message={errors.monthly_rent} /></Field><Field label="Security deposit" hint="optional"><input type="number" min="0" step="0.01" className={inputClass} value={form.security_deposit ?? ''} onChange={(event) => set('security_deposit', event.target.value === '' ? null : Number(event.target.value))} placeholder="0.00" /></Field><Field label="Lease start"><input type="date" className={inputClass} value={form.lease_start_date ?? ''} onChange={(event) => set('lease_start_date', event.target.value || null)} /></Field><Field label="Lease end"><input type="date" className={inputClass} value={form.lease_end_date ?? ''} onChange={(event) => set('lease_end_date', event.target.value || null)} /><FormError message={errors.lease_end_date} /></Field><Field label="Rent due day" hint="optional"><input type="number" min="1" max="31" className={inputClass} value={form.rent_due_day ?? ''} onChange={(event) => set('rent_due_day', event.target.value === '' ? null : Number(event.target.value))} placeholder="1" /><FormError message={errors.rent_due_day} /></Field><FormError message={errors.renter} /></div>}
-      </section>
-
-      <section className="mt-6 border-t border-[#ebe8e3] pt-5"><p className="text-[12px] font-semibold text-[#35322e]">Unit notes</p><div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label="Amenities" hint="optional"><textarea className={textAreaClass} rows={2} value={form.amenities ?? ''} onChange={(event) => set('amenities', event.target.value)} placeholder="Pool, balcony, laundry..." /></Field><Field label="Utilities" hint="optional"><textarea className={textAreaClass} rows={2} value={form.utilities_information ?? ''} onChange={(event) => set('utilities_information', event.target.value)} placeholder="Included utilities or providers" /></Field><Field label="Parking" hint="optional"><textarea className={textAreaClass} rows={2} value={form.parking_information ?? ''} onChange={(event) => set('parking_information', event.target.value)} placeholder="Space, permit, or restrictions" /></Field><Field label="Notes" hint="optional"><textarea className={textAreaClass} rows={2} value={form.notes ?? ''} onChange={(event) => set('notes', event.target.value)} placeholder="Private notes for your team" /></Field></div></section>
-      {errors.form && <div className="mt-4 flex items-start gap-2 rounded-[9px] border border-[#f0c8c3] bg-[#fff7f6] px-3 py-2.5 text-[12px] text-[#a33a30]"><AlertCircle size={14} className="mt-0.5 flex-shrink-0" />{errors.form}</div>}
-      <div className="mt-5 flex justify-end gap-2 border-t border-[#ebe8e3] pt-4"><button onClick={onClose} disabled={saving} className="h-9 rounded-[9px] border border-[#e4e2de] px-4 text-[12px] font-medium text-[#625e57]">Cancel</button><button onClick={submit} disabled={saving} className="flex h-9 items-center gap-2 rounded-[9px] bg-[#151412] px-4 text-[12px] font-semibold text-white disabled:opacity-50">{saving && <Loader2 size={13} className="animate-spin" />}{unit ? 'Save changes' : 'Add unit'}</button></div>
+function ConfirmUnitDelete({ unit, onCancel, onConfirm }: { unit: Unit; onCancel: () => void; onConfirm: () => Promise<void> }) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState('');
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await onConfirm();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to delete this unit.');
+      setDeleting(false);
+    }
+  };
+  return <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+    <button type="button" aria-label="Close delete confirmation" onClick={deleting ? undefined : onCancel} className="absolute inset-0 bg-[#171511]/30 backdrop-blur-[2px]" />
+    <div role="dialog" aria-modal="true" className="relative w-full max-w-[360px] rounded-[14px] border border-[#e4e2de] bg-[#fbfaf8] p-5 shadow-[0_24px_80px_rgba(25,22,18,.18)]">
+      <p className="text-[13px] font-semibold text-[#24211e]">Delete unit {unit.unit_number}?</p>
+      <p className="mt-1 text-[11px] leading-5 text-[#8f8980]">Linked unit contacts will be removed. Requests will keep their records but lose this unit link.</p>
+      <FormError message={error} />
+      <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onCancel} disabled={deleting} className="h-8 rounded-[8px] border border-[#e4e2de] px-3 text-[10px] font-semibold text-[#625e57]">Cancel</button><button type="button" data-testid="button-confirm-delete-unit" onClick={remove} disabled={deleting} className="flex h-8 items-center gap-1.5 rounded-[8px] bg-[#b33d32] px-3 text-[10px] font-semibold text-white disabled:opacity-50">{deleting && <Loader2 size={11} className="animate-spin" />}Delete unit</button></div>
     </div>
-  </Modal>;
+  </div>;
 }
 
 export default function PropertyUnitManager({
@@ -225,26 +429,47 @@ export default function PropertyUnitManager({
   onSave: (payload: UnitSavePayload, existingUnit: Unit | null) => Promise<void>;
   onDelete: (unit: Unit) => Promise<void>;
 }) {
+  const supportsUnits = property.property_type === 'multifamily_units' || property.property_type === 'apartment_building';
   const [formUnit, setFormUnit] = useState<Unit | null | undefined>(undefined);
-  const canHaveUnits = property.property_type === 'apartment_building';
-  const propertyUnits = units.filter((unit) => unit.property_id === property.id).sort((a, b) => a.unit_number.localeCompare(b.unit_number, undefined, { numeric: true }));
-  const apartmentCount = propertyUnits.filter((unit) => unit.unit_type === 'apartment').length;
-  const owners = relationships.filter((item) => item.property_id === property.id && item.relationship_type === 'owner' && !item.unit_id);
-  const tenantsByUnit = useMemo(() => new Map(relationships.filter((item) => item.relationship_type === 'tenant' && item.unit_id).map((item) => [item.unit_id as string, contacts.find((contact) => String(contact.id) === String(item.contact_id))?.name ?? 'Renter unavailable'])), [relationships, contacts]);
-  const ownersByUnit = useMemo(() => {
-    const next = new Map<string, string>();
-    propertyUnits.forEach((unit) => {
-      const directOwner = relationships.find((item) => item.unit_id === unit.id && item.relationship_type === 'owner');
-      const inheritedOwner = directOwner ?? (owners.length === 1 ? owners[0] : owners.find((item) => scopeMatchesUnit(item.ownership_scope, unit.unit_number)));
-      const ownerName = contacts.find((contact) => String(contact.id) === String(inheritedOwner?.contact_id))?.name;
-      if (ownerName) next.set(unit.id, ownerName);
-    });
-    return next;
-  }, [propertyUnits, relationships, owners, contacts]);
-  if (!canHaveUnits) return <div className="mt-4 rounded-[11px] border border-dashed border-[#dedad3] bg-[#faf9f7] px-4 py-3 text-[11px] text-[#97928a]">Units are only available for building properties. This property is managed as a single record.</div>;
-  return <div className="mt-4 border-t border-[#f0eeeb] pt-3">
-    <div className="flex items-center justify-between gap-3"><div><p className="text-[11px] font-semibold uppercase tracking-[.08em] text-[#77736d]">Units</p><p className="mt-1 text-[10px] text-[#aaa59d]">{propertyUnits.length} added · {property.units_count ?? 'No'} apartment limit · {owners.length === 1 ? 'Owner inherited from property' : 'Unit ownership available'}</p></div><button onClick={() => setFormUnit(null)} className="flex h-8 items-center gap-1.5 rounded-[8px] bg-[#151412] px-3 text-[11px] font-semibold text-white"><Plus size={12} />Add unit</button></div>
-     {propertyUnits.length === 0 ? <div className="mt-3 rounded-[10px] border border-dashed border-[#d9d5ce] px-4 py-5 text-center text-[11px] text-[#97928a]">No units yet. Add apartments up to the property limit, or add shared spaces such as a gym or parking area.</div> : <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{propertyUnits.map((unit) => <div key={unit.id} className="rounded-[10px] border border-[#eeeae5] bg-[#faf9f7] p-3"><div className="flex items-start justify-between gap-2"><div className="flex min-w-0 items-center gap-2"><div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[8px] bg-[#eeebe5] text-[#706b62]"><DoorOpen size={14} /></div><div className="min-w-0"><p className="truncate text-[12px] font-semibold text-[#35322e]">{unit.unit_number}</p><p className="text-[10px] text-[#97928a]">{unitTypeLabel(unit.unit_type)}</p></div></div><StatusPill status={unit.status} /></div><div className="mt-3 grid grid-cols-2 gap-2 border-t border-[#eeeae5] pt-2 text-[10px]"><div><p className="text-[#aaa59d]">Owner</p><p className="mt-0.5 truncate text-[#625e57]">{ownersByUnit.get(unit.id) ?? (owners.length === 1 ? 'Property owner' : 'Not assigned')}</p></div><div><p className="text-[#aaa59d]">Renter</p><p className="mt-0.5 truncate text-[#625e57]">{tenantsByUnit.get(unit.id) ?? 'Not rented'}</p></div></div><div className="mt-3 flex justify-end gap-1.5"><button onClick={() => setFormUnit(unit)} className="flex h-7 items-center gap-1 rounded-[7px] border border-[#e0ddd7] bg-white px-2 text-[10px] font-semibold text-[#625e57]"><Pencil size={11} />Edit</button><button onClick={() => { if (window.confirm(`Delete unit ${unit.unit_number}?`)) void onDelete(unit); }} className="flex h-7 items-center gap-1 rounded-[7px] border border-[#efd0cc] bg-white px-2 text-[10px] font-semibold text-[#a33a30]"><Trash2 size={11} />Delete</button></div></div>)}</div>}
-    <AnimatePresence>{formUnit !== undefined && <UnitForm key={`${formUnit?.id ?? 'new'}-${property.id}`} property={property} unit={formUnit} units={propertyUnits} contacts={contacts} relationships={relationships} onSave={(payload) => onSave(payload, formUnit)} onClose={() => setFormUnit(undefined)} />}</AnimatePresence>
-  </div>;
+  const [deleteUnit, setDeleteUnit] = useState<Unit | null>(null);
+  const [feedback, setFeedback] = useState('');
+  const propertyUnits = units.filter((unit) => unit.property_id === property.id);
+  const atCapacity = property.units_count !== null && propertyUnits.length >= property.units_count;
+  if (!supportsUnits) return null;
+
+  const deleteSelectedUnit = async () => {
+    if (!deleteUnit) return;
+    try {
+      await onDelete(deleteUnit);
+      setDeleteUnit(null);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Unable to delete the unit.');
+      throw error;
+    }
+  };
+
+  return <>
+    <section data-testid={`property-units-${property.id}`} className="mt-4 border-t border-[#f0eeeb] pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <div><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#77736d]">Units</p><p data-testid={`text-property-unit-count-${property.id}`} className="mt-1 text-[10px] text-[#9a958d]">{propertyUnits.length} of {property.units_count ?? 0} added</p></div>
+        <button type="button" data-testid={`button-add-unit-${property.id}`} onClick={() => { setFeedback(''); setFormUnit(null); }} disabled={atCapacity} className="flex h-8 items-center gap-1.5 rounded-[8px] bg-[#55776b] px-3 text-[10px] font-semibold text-white hover:bg-[#456357] disabled:cursor-not-allowed disabled:bg-[#b9c4bb]"><Plus size={12} />Add unit</button>
+      </div>
+      {atCapacity && <p data-testid={`text-property-unit-capacity-${property.id}`} className="mt-2 text-[10px] text-[#8c887f]">The configured unit capacity has been reached.</p>}
+      {feedback && <p className="mt-2 text-[10px] text-[#a33e34]">{feedback}</p>}
+      {propertyUnits.length === 0 ? <div className="mt-3 rounded-[9px] border border-dashed border-[#e4e1da] px-3 py-4 text-center text-[10px] text-[#99948b]">No units added yet.</div> : <div className="mt-3 space-y-2">
+        {propertyUnits.map((unit) => {
+          const tenant = relationships.find((item) => item.unit_id === unit.id && item.relationship_type === 'tenant' && !item.end_date);
+          const tenantName = contacts.find((contact) => String(contact.id) === String(tenant?.contact_id))?.name;
+          const facilitySummary = [...(unit.facilities ?? []), ...(unit.custom_facilities ?? [])].slice(0, 3).join(', ');
+          const floorLabel = unit.floor === null ? null : unit.floor === 0 ? 'Ground floor' : `Floor ${unit.floor}`;
+          return <article key={unit.id} data-testid={`row-property-unit-${unit.id}`} className="flex items-center justify-between gap-3 rounded-[9px] border border-[#eeece7] bg-[#fdfdfc] px-3 py-2.5">
+            <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-[11px] font-semibold text-[#37342f]">{unit.unit_number}</p><span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${unit.status === 'occupied' ? 'bg-[#edf7ef] text-[#327443]' : 'bg-[#eef5fb] text-[#39709c]'}`}>{unit.status === 'occupied' ? 'Rented' : 'Not rented'}</span>{floorLabel && <span className="text-[9px] text-[#8d8981]">{floorLabel}</span>}</div><p className="mt-1 truncate text-[9px] text-[#928d84]">{tenantName ? `Renter: ${tenantName}` : unit.room_count ? `${unit.room_count} rooms` : 'No renter'}{unit.monthly_rent ? ` · ${formatMoney(unit.monthly_rent)}/mo` : ''}{facilitySummary ? ` · ${facilitySummary}` : ''}</p></div>
+            <div className="flex shrink-0 gap-1"><button type="button" aria-label={`Edit unit ${unit.unit_number}`} data-testid={`button-edit-unit-${unit.id}`} onClick={() => { setFeedback(''); setFormUnit(unit); }} className="flex h-7 w-7 items-center justify-center rounded-[7px] border border-[#e6e3dd] text-[#77736d] hover:bg-[#f2f0ec]"><Pencil size={11} /></button><button type="button" aria-label={`Delete unit ${unit.unit_number}`} data-testid={`button-delete-unit-${unit.id}`} onClick={() => setDeleteUnit(unit)} className="flex h-7 w-7 items-center justify-center rounded-[7px] border border-[#efd0cc] text-[#a33e34] hover:bg-[#fff2f0]"><Trash2 size={11} /></button></div>
+          </article>;
+        })}
+      </div>}
+    </section>
+    <AnimatePresence>{formUnit !== undefined && <UnitForm key={formUnit?.id ?? 'new'} property={property} unit={formUnit} units={propertyUnits} contacts={contacts} relationships={relationships} onSave={(payload, existing) => onSave(payload, existing)} onClose={() => setFormUnit(undefined)} />}</AnimatePresence>
+    {deleteUnit && <ConfirmUnitDelete unit={deleteUnit} onCancel={() => setDeleteUnit(null)} onConfirm={deleteSelectedUnit} />}
+  </>;
 }
