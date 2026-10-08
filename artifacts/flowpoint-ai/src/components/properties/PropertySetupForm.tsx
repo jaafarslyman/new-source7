@@ -4,6 +4,7 @@ import {
   AlertCircle, Building2, Check, Loader2, Plus, Trash2, UserRound, X,
 } from 'lucide-react';
 import FlowPointSelect from '@/components/FlowPointSelect';
+import { UnitSetupModal, type UnitSavePayload } from '@/components/PropertyUnitManager';
 import {
   APARTMENT_BUILDING_FACILITIES,
   blankProperty,
@@ -13,7 +14,8 @@ import {
   type Property,
   type PropertyDraft,
 } from '@/lib/propertiesTypes';
-import type { Contact } from '@/lib/contactsTypes';
+import type { Contact, ContactPropertyRelationship } from '@/lib/contactsTypes';
+import type { Unit } from '@/lib/unitsTypes';
 
 export interface PropertyOwnerDraft {
   id?: string | number;
@@ -44,7 +46,8 @@ interface PropertySetupFormProps {
   contacts: Contact[];
   initialOwners: PropertyOwnerDraft[];
   initialRenter: PropertyRenterDraft | null;
-  onSave: (draft: PropertyDraft, owners: PropertyOwnerDraft[], renter: PropertyRenterDraft | null) => Promise<void>;
+  existingUnits: Unit[];
+  onSave: (draft: PropertyDraft, owners: PropertyOwnerDraft[], renter: PropertyRenterDraft | null, units: UnitSavePayload[]) => Promise<void>;
   onClose: () => void;
 }
 
@@ -123,7 +126,7 @@ function ContactFields({
       if (entityType === 'company') return contact.contact_type === 'company' || String(contact.id) === row.contact_id;
       return contact.contact_type !== 'company' || String(contact.id) === row.contact_id;
     }
-    return ['tenant', 'former_tenant', 'other'].includes(contact.contact_type ?? '') || String(contact.id) === row.contact_id;
+    return true;
   });
   return (
     <>
@@ -157,7 +160,7 @@ function ContactFields({
   );
 }
 
-export default function PropertySetupForm({ property, contacts, initialOwners, initialRenter, onSave, onClose }: PropertySetupFormProps) {
+export default function PropertySetupForm({ property, contacts, initialOwners, initialRenter, existingUnits, onSave, onClose }: PropertySetupFormProps) {
   const [form, setForm] = useState<PropertyDraft>(() => ({ ...blankProperty }));
   const [category, setCategory] = useState<PropertyCategory | ''>('');
   const [roomCount, setRoomCount] = useState('');
@@ -169,6 +172,8 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
   const [owners, setOwners] = useState<OwnerDraft[]>([blankOwner()]);
   const [rented, setRented] = useState<boolean | null>(null);
   const [renter, setRenter] = useState<PropertyRenterDraft>(blankRenter());
+  const [pendingUnits, setPendingUnits] = useState<UnitSavePayload[]>([]);
+  const [unitEditorOpen, setUnitEditorOpen] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
   const ownersSignature = JSON.stringify(initialOwners);
@@ -222,6 +227,8 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
       lease_start_date: property?.lease_start_date ?? initialRenter?.lease_start_date ?? '',
       lease_end_date: property?.lease_end_date ?? initialRenter?.lease_end_date ?? '',
     });
+    setPendingUnits([]);
+    setUnitEditorOpen(false);
     setSaveError('');
   }, [property, ownersSignature, initialRenter]);
 
@@ -231,6 +238,92 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
   const multifamily = subtype === 'multifamily_units';
   const apartment = subtype === 'apartment_building';
   const selectedFacilities = useMemo(() => new Set(facilities), [facilities]);
+  const previewProperty = useMemo<Property>(() => ({
+    ...blankProperty,
+    ...(property ?? {}),
+    id: property?.id ?? 'pending-property',
+    company_id: property?.company_id ?? null,
+    created_at: property?.created_at ?? '',
+    updated_at: property?.updated_at ?? '',
+    name: form.name || 'New property',
+    property_category: category || 'residential',
+    property_type: subtype,
+    units_count: multifamily || apartment ? form.units_count : null,
+    floor_count: singleFamily || apartment ? (floorCount ? Number(floorCount) : null) : null,
+    floor_unit_counts: apartment ? floorCapacities.map((capacity) => Number(capacity) || 0) : [],
+    room_count: singleFamily ? (roomCount ? Number(roomCount) : null) : null,
+    facilities,
+    custom_facilities: customFacilities,
+    is_rented: singleFamily ? Boolean(rented) : false,
+    monthly_rent: singleFamily && rented ? Number(renter.monthly_rent) || null : null,
+    lease_term_type: singleFamily && rented ? renter.lease_term_type : null,
+    lease_start_date: singleFamily && rented ? renter.lease_start_date || null : null,
+    lease_end_date: singleFamily && rented && renter.lease_term_type === 'fixed' ? renter.lease_end_date || null : null,
+  }), [property, form, category, subtype, multifamily, apartment, singleFamily, floorCount, floorCapacities, roomCount, facilities, customFacilities, rented, renter]);
+  const inlineOwnerData = useMemo(() => {
+    const syntheticContacts: Contact[] = [];
+    const relations: ContactPropertyRelationship[] = [];
+    if (apartment) owners.forEach((owner, index) => {
+      const selectedContact = contacts.find((contact) => String(contact.id) === owner.contact_id);
+      const contactId = owner.source === 'existing' && owner.contact_id ? Number(owner.contact_id) : -(index + 1);
+      if (owner.source === 'new') syntheticContacts.push({
+        id: contactId,
+        company_id: null,
+        created_at: '',
+        updated_at: null,
+        name: owner.name,
+        email: owner.email || null,
+        phone: owner.phone || null,
+        business_name: null,
+        notes: null,
+        customer_id: null,
+        contact_type: owner.entity_type === 'company' ? 'company' : 'property_owner',
+        status: 'active',
+        preferred_channel: owner.email ? 'email' : 'phone',
+        alternate_phone: null,
+        address: null,
+        city: null,
+        state: null,
+        zip_code: null,
+        country: null,
+        company_name: null,
+        ai_summary: null,
+        internal_notes: null,
+        last_contacted_at: null,
+      });
+      relations.push({
+        id: `pending-building-owner-${index}`,
+        company_id: null,
+        contact_id: selectedContact ? Number(selectedContact.id) : contactId,
+        property_id: previewProperty.id,
+        unit_id: null,
+        relationship_type: 'owner',
+        start_date: null,
+        end_date: null,
+        notes: null,
+        ownership_percentage: apartment && owners.length > 1 ? null : Number(owner.ownership_percentage) || null,
+        ownership_scope: apartment && owners.length > 1 ? owner.ownership_scope : null,
+      });
+    });
+    return { contacts: [...contacts, ...syntheticContacts], relationships: relations };
+  }, [apartment, owners, contacts, previewProperty.id]);
+  const inlineUnitRecords = useMemo<Unit[]>(() => pendingUnits.map((item, index) => ({
+    ...item.draft,
+    id: `pending-unit-${index}`,
+    company_id: null,
+    created_at: '',
+    updated_at: '',
+    property_id: previewProperty.id,
+  })), [pendingUnits, previewProperty.id]);
+  const configuredUnits = Number(previewProperty.units_count) || 0;
+  const inlineUnitLimitReached = configuredUnits > 0 && inlineUnitRecords.length >= configuredUnits;
+  const inlineLayoutReady = configuredUnits > 0 && Number.isInteger(configuredUnits)
+    && (!apartment || (
+      Number(floorCount) > 0
+      && floorCapacities.length === Number(floorCount)
+      && floorCapacities.every((capacity) => capacity.trim() !== '' && Number.isInteger(Number(capacity)) && Number(capacity) >= 0)
+      && floorCapacities.reduce((sum, capacity) => sum + Number(capacity), 0) === configuredUnits
+    ));
 
   const setField = (key: keyof PropertyDraft, value: string | number | null) => setForm((current) => ({ ...current, [key]: value }));
   const setOwner = (index: number, patch: Partial<OwnerDraft>) => setOwners((current) => current.map((owner, i) => i === index ? { ...owner, ...patch } : owner));
@@ -248,6 +341,9 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
       if (!floorCount.trim() || !Number.isInteger(Number(floorCount)) || Number(floorCount) <= 0) next.floor_count = 'Enter a whole-number floor count greater than 0.';
     }
     if (multifamily && (!form.units_count || !Number.isInteger(Number(form.units_count)) || Number(form.units_count) <= 0)) next.units_count = 'Enter a whole-number unit count greater than 0.';
+    if ((multifamily || apartment) && Number.isInteger(Number(form.units_count)) && Number(form.units_count) > 0 && pendingUnits.length > Number(form.units_count)) {
+      next.inline_units = `The property is configured for ${form.units_count} units, but ${pendingUnits.length} have been added.`;
+    }
     if (apartment) {
       if (!floorCount.trim() || !Number.isInteger(Number(floorCount)) || Number(floorCount) <= 0) next.floor_count = 'Enter a whole-number floor count greater than 0.';
       if (!form.units_count || !Number.isInteger(Number(form.units_count)) || Number(form.units_count) <= 0) next.units_count = 'Enter a whole-number unit count greater than 0.';
@@ -255,6 +351,15 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
       if (expectedFloors > 0 && floorCapacities.length !== expectedFloors) next.floor_capacities = 'Add capacity for every floor.';
       else if (floorCapacities.length && floorCapacities.some((capacity) => capacity.trim() === '' || !Number.isInteger(Number(capacity)) || Number(capacity) < 0)) next.floor_capacities = 'Use a whole-number capacity of 0 or more for each floor.';
       else if (floorCapacities.length && Number(form.units_count) > 0 && floorCapacities.reduce((sum, value) => sum + Number(value), 0) !== Number(form.units_count)) next.floor_capacities = `Floor capacities must add up to ${form.units_count}.`;
+      if (floorCapacities.length === expectedFloors && pendingUnits.length) {
+        const assignedByFloor = Array.from({ length: expectedFloors }, () => 0);
+        pendingUnits.forEach(({ draft }) => {
+          if (draft.floor !== null && draft.floor >= 0 && draft.floor < expectedFloors) assignedByFloor[draft.floor] += 1;
+        });
+        if (assignedByFloor.some((count, index) => count > Number(floorCapacities[index] || 0))) {
+          next.inline_floor_capacity = 'The units already added exceed the capacity of at least one floor.';
+        }
+      }
     }
     if ((singleFamily || apartment) && owners.length === 0) next.owners = 'Add at least one owner.';
     if (singleFamily || apartment) {
@@ -290,7 +395,7 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
       }
     }
     return next;
-  }, [form, subtype, singleFamily, multifamily, apartment, residential, roomCount, floorCount, floorCapacities, owners, rented, renter]);
+  }, [form, subtype, singleFamily, multifamily, apartment, residential, roomCount, floorCount, floorCapacities, owners, rented, renter, pendingUnits]);
 
   const canSave = Object.keys(validation).length === 0 && !saving;
   const save = async () => {
@@ -336,7 +441,7 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
       monthly_rent: renter.monthly_rent.trim(),
     } : null;
     try {
-      await onSave(extras, ownerRows, renterRow);
+      await onSave(extras, ownerRows, renterRow, pendingUnits);
       onClose();
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'We could not save this property. Please try again.');
@@ -360,10 +465,10 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
           <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
             <div className="sm:col-span-2"><Field label="Property name" required><input autoFocus data-testid="input-property-name" className={inputClass} value={form.name} onChange={(event) => setField('name', event.target.value)} placeholder="e.g. Harbor View Residences" /></Field><FormError message={validation.name} testId="error-property-name" /></div>
             <Field label="Property category" required>
-              <FlowPointSelect testId="select-property-category" value={category} onChange={(value) => { const nextCategory = value as PropertyCategory; setCategory(nextCategory); setField('property_category', value); setField('property_type', ''); }} placeholder="Choose a category" options={[...PROPERTY_CATEGORIES]} />
+              <FlowPointSelect testId="select-property-category" value={category} onChange={(value) => { const nextCategory = value as PropertyCategory; setCategory(nextCategory); setField('property_category', value); setField('property_type', ''); setPendingUnits([]); }} placeholder="Choose a category" options={[...PROPERTY_CATEGORIES]} />
             </Field>
             <Field label="Property subtype" required>
-              <FlowPointSelect testId="select-property-subtype" value={subtype} onChange={(value) => { setField('property_type', value); setField('units_count', null); setFloorCount(''); setFloorCapacities([]); }} placeholder={category ? 'Choose a subtype' : 'Choose a category first'} disabled={!category} options={category ? [...PROPERTY_TYPES_BY_CATEGORY[category]] : []} />
+              <FlowPointSelect testId="select-property-subtype" value={subtype} onChange={(value) => { setField('property_type', value); setField('units_count', null); setFloorCount(''); setFloorCapacities([]); setPendingUnits([]); }} placeholder={category ? 'Choose a subtype' : 'Choose a category first'} disabled={!category} options={category ? [...PROPERTY_TYPES_BY_CATEGORY[category]] : []} />
             </Field>
             <div className="sm:col-span-2"><FormError message={validation.subtype} testId="error-property-subtype" /></div>
             <div className="sm:col-span-2"><Field label="Address line 1" required><input data-testid="input-property-address-line1" className={inputClass} value={form.address_line1 ?? ''} onChange={(event) => setField('address_line1', event.target.value)} placeholder="Street address" /></Field><FormError message={validation.address_line1} testId="error-property-address-line1" /></div>
@@ -389,7 +494,7 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         {singleFamily && <><Field label="Rooms" required><input data-testid="input-property-room-count" className={inputClass} type="number" min="1" step="1" value={roomCount} onChange={(event) => setRoomCount(event.target.value)} placeholder="e.g. 5" /></Field><Field label="Floors" required><input data-testid="input-property-floor-count" className={inputClass} type="number" min="1" step="1" value={floorCount} onChange={(event) => { const value = event.target.value; setFloorCount(value); setFloorCapacities(Array.from({ length: Math.min(Number(value) || 0, 100) }, (_, index) => floorCapacities[index] ?? '')); }} placeholder="e.g. 2" /></Field></>}
                         {apartment && <><Field label="Floors" required><input data-testid="input-property-floor-count" className={inputClass} type="number" min="1" step="1" value={floorCount} onChange={(event) => { const value = event.target.value; setFloorCount(value); setFloorCapacities(Array.from({ length: Math.min(Number(value) || 0, 100) }, (_, index) => floorCapacities[index] ?? '')); }} placeholder="e.g. 4" /></Field><Field label="Total units" required><input data-testid="input-property-unit-count" className={inputClass} type="number" min="1" step="1" value={form.units_count ?? ''} onChange={(event) => setField('units_count', event.target.value ? Number(event.target.value) : null)} placeholder="e.g. 24" /><FormError message={validation.units_count} testId="error-property-unit-count" /></Field></>}
-                        {multifamily && <div className="sm:col-span-2"><Field label="Number of units" required><input data-testid="input-property-unit-count" className={inputClass} type="number" min="1" step="1" value={form.units_count ?? ''} onChange={(event) => setField('units_count', event.target.value ? Number(event.target.value) : null)} placeholder="e.g. 8" /></Field><FormError message={validation.units_count} testId="error-property-unit-count" /><p className="mt-1.5 text-[10px] text-[#969188]">Individual unit setup happens later, outside this form.</p></div>}
+                        {multifamily && <div className="sm:col-span-2"><Field label="Number of units" required><input data-testid="input-property-unit-count" className={inputClass} type="number" min="1" step="1" value={form.units_count ?? ''} onChange={(event) => setField('units_count', event.target.value ? Number(event.target.value) : null)} placeholder="e.g. 8" /></Field><FormError message={validation.units_count} testId="error-property-unit-count" /><p className="mt-1.5 text-[10px] text-[#969188]">You can add units now or later from the property card.</p></div>}
                       </div>
                       {singleFamily && <div className="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-2"><FormError message={validation.room_count} testId="error-property-room-count" /><FormError message={validation.floor_count} testId="error-property-floor-count" /></div>}
                       {apartment && <>
@@ -421,11 +526,11 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
                         {owners.map((owner, index) => (
                           <article key={owner.id ?? `owner-${index}`} data-testid={`card-property-owner-${index}`} className="rounded-[12px] border border-[#e7e4de] bg-white p-3.5 sm:p-4">
                             <div className="mb-3 flex items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#f0f2ec] text-[#7e8a77]"><UserRound size={13} /></span><div><p className="text-[12px] font-semibold text-[#37362f]">{owners.length > 1 ? `Owner ${index + 1}` : 'Property owner'}</p><p className="mt-0.5 text-[10px] text-[#969188]">Select a contact or add one</p></div></div>{owners.length > 1 && <button type="button" data-testid={`button-remove-owner-${index}`} onClick={() => setOwners((current) => current.filter((_, ownerIndex) => ownerIndex !== index))} aria-label={`Remove owner ${index + 1}`} className="flex h-7 w-7 items-center justify-center rounded-full text-[#938e85] hover:bg-[#fbefed] hover:text-[#a33e34]"><Trash2 size={13} /></button>}</div>
-                             <ContactFields row={owner} index={index} kind="owner" contacts={contacts} entityType={owner.entity_type} onChange={(patch) => setOwner(index, patch as Partial<OwnerDraft>)} />
                             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                                <Field label="Entity type" required><FlowPointSelect testId={`select-owner-${index}-entity-type`} value={owner.entity_type} onChange={(value) => setOwner(index, { entity_type: value as OwnerDraft['entity_type'], contact_id: '', source: 'existing' })} placeholder="Choose entity type" options={[{ value: 'individual', label: 'Individual' }, { value: 'company', label: 'Company' }]} /></Field>
                               {apartment ? owners.length > 1 ? <Field label="Unit scope" required hint="units or ranges"><input data-testid={`input-owner-${index}-scope`} className={inputClass} value={owner.ownership_scope} onChange={(event) => setOwner(index, { ownership_scope: event.target.value })} placeholder="e.g. 1–4, 8" /></Field> : <div className="flex items-center rounded-[9px] bg-[#f6f5f1] px-3 text-[10px] text-[#87837b]">Sole building owner</div> : <Field label="Ownership share" required><div className="relative"><input data-testid={`input-owner-${index}-percentage`} className={`${inputClass} pr-8`} type="number" min="0" max="100" step="0.01" value={owner.ownership_percentage} onChange={(event) => setOwner(index, { ownership_percentage: event.target.value })} placeholder="e.g. 100" /><span className="pointer-events-none absolute right-3 top-[11px] text-[11px] text-[#929087]">%</span></div></Field>}
                             </div>
+                             <div className="mt-3"><ContactFields row={owner} index={index} kind="owner" contacts={contacts} entityType={owner.entity_type} onChange={(patch) => setOwner(index, patch as Partial<OwnerDraft>)} /></div>
                             <FormError message={validation[`owner_${index}`] || validation[`owner_share_${index}`]} testId={`error-property-owner-${index}`} />
                           </article>
                         ))}
@@ -455,6 +560,18 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
                     )}
                   </>
                 )}
+                {!property && (multifamily || apartment) && (
+                  <section className="mt-7 border-t border-[#e9e6e0] pt-6" data-testid="section-property-inline-units">
+                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                      <div><p className="text-[12px] font-semibold text-[#37362f]">Add units now</p><p className="mt-1 text-[10px] leading-4 text-[#969188]">Set up homes here, or create the property first and add units from its card.</p></div>
+                      <span data-testid="text-inline-unit-count" className="rounded-full bg-[#f0f2ec] px-2.5 py-1 text-[10px] font-semibold text-[#617565]">{inlineUnitRecords.length} / {configuredUnits || '—'} units</span>
+                    </div>
+                    {inlineUnitRecords.length > 0 ? <div className="mb-3 space-y-2">{inlineUnitRecords.map((unit, index) => <article key={`${unit.unit_number}-${index}`} data-testid={`card-inline-unit-${index}`} className="flex items-center justify-between gap-3 rounded-[10px] border border-[#e7e4de] bg-white px-3 py-2.5"><div className="min-w-0"><p className="truncate text-[11px] font-semibold text-[#45433c]">{unit.unit_number}</p><p className="mt-0.5 text-[10px] text-[#969188]">{apartment ? unit.floor === 0 ? 'Ground floor' : `Floor ${unit.floor}` : `${unit.floor_count} interior floor${unit.floor_count === 1 ? '' : 's'}`} · {unit.room_count} rooms</p></div><button type="button" data-testid={`button-remove-inline-unit-${index}`} onClick={() => setPendingUnits((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove unit ${unit.unit_number}`} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#938e85] hover:bg-[#fbefed] hover:text-[#a33e34]"><Trash2 size={13} /></button></article>)}</div> : <p className="mb-3 rounded-[10px] border border-dashed border-[#d8d5ce] px-3 py-4 text-center text-[10px] text-[#9a958d]">No units added yet.</p>}
+                    <FormError message={validation.inline_units || validation.inline_floor_capacity} />
+                    <button type="button" data-testid="button-add-inline-unit" disabled={!inlineLayoutReady || inlineUnitLimitReached} onClick={() => setUnitEditorOpen(true)} className="flex h-9 items-center gap-2 rounded-[9px] border border-dashed border-[#d8d5ce] px-3 text-[11px] font-semibold text-[#6f6b63] transition-colors hover:border-[#aebcaf] hover:bg-[#f3f6f1] hover:text-[#4f6d58] disabled:cursor-not-allowed disabled:opacity-45"><Plus size={13} />{inlineUnitLimitReached ? 'Unit limit reached' : 'Add a unit'}</button>
+                    {!inlineLayoutReady && <p className="mt-2 text-[10px] text-[#9a958d]">{apartment ? 'Enter the total unit count and valid capacity for every floor first.' : 'Enter the total unit count first.'}</p>}
+                  </section>
+                )}
                 {!residential && <div data-testid="text-property-basic-setup" className="rounded-[10px] border border-[#e7e4de] bg-white px-4 py-3 text-[11px] leading-5 text-[#817d75]">The location and property classification are ready. Additional setup for this property type will be available in a later step.</div>}
               </motion.div>
             )}
@@ -468,6 +585,7 @@ export default function PropertySetupForm({ property, contacts, initialOwners, i
           <div className="flex gap-2"><button type="button" data-testid="button-cancel-property-setup" onClick={onClose} disabled={saving} className="h-9 rounded-[9px] border border-[#e2dfd8] px-4 text-[11px] font-semibold text-[#66635c] transition-colors hover:bg-[#f1efeb] disabled:opacity-50">Cancel</button><button type="button" data-testid="button-save-property-setup" onClick={save} disabled={!canSave} title={!canSave && Object.keys(validation).length ? 'Complete the required fields to continue' : undefined} className="flex h-9 min-w-[122px] items-center justify-center gap-2 rounded-[9px] bg-[#55776b] px-4 text-[11px] font-semibold text-white transition-colors hover:bg-[#456357] disabled:cursor-not-allowed disabled:bg-[#b9c4bb]">{saving ? <><Loader2 size={13} className="animate-spin" />Saving…</> : property ? 'Save changes' : 'Create property'}</button></div>
         </footer>
       </motion.section>
+      {unitEditorOpen && (multifamily || apartment) && <UnitSetupModal property={previewProperty} units={[...existingUnits.filter((unit) => unit.property_id === previewProperty.id), ...inlineUnitRecords]} contacts={inlineOwnerData.contacts} relationships={inlineOwnerData.relationships} onSave={async (payload) => { setPendingUnits((current) => [...current, { ...payload, draft: { ...payload.draft, property_id: previewProperty.id } }]); setUnitEditorOpen(false); }} onClose={() => setUnitEditorOpen(false)} />}
     </div>
   );
 }

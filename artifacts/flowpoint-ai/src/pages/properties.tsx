@@ -179,7 +179,7 @@ function PropertyCard({
     <div className="mt-3 border-t border-[#f0eeeb] pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap items-center gap-1.5"><span className="text-[10px] font-medium text-[#6e6a62]">{propertyCategoryLabel(property.property_category)}</span><span className="h-1 w-1 rounded-full bg-[#d2cec7]" /><span className="text-[10px] text-[#77736d]">{propertyTypeLabel(property.property_type)}</span></div><StatusPill status={property.status} /></div>
       <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
-        <div><p className="text-[#aaa59d]">Units</p><p className="mt-0.5 font-semibold text-[#625e57]">{property.units_count ?? '—'}</p></div>
+        <div><p className="text-[#aaa59d]">Units</p><p className="mt-0.5 font-semibold text-[#625e57]">{isSingleHome ? 1 : property.units_count ?? '—'}</p></div>
         <div><p className="text-[#aaa59d]">Rented</p><p className="mt-0.5 font-semibold text-[#625e57]">{rented}</p></div>
         <div><p className="text-[#aaa59d]">Owners</p><p className="mt-0.5 flex items-center gap-1 font-semibold text-[#625e57]"><Users size={10} />{ownerCount}</p></div>
       </div>
@@ -339,9 +339,10 @@ export default function PropertiesPage() {
       ...current.filter((item) => !(item.property_id === propertyId && !item.unit_id && (item.relationship_type === 'owner' || item.relationship_type === 'tenant'))),
       ...((data as ContactPropertyRelationship[]) ?? []),
     ]);
+    return resolvedContacts;
   };
 
-  const saveProperty = async (draft: PropertyDraft, ownerDrafts: PropertyOwnerDraft[], renterDraft: PropertyRenterDraft | null) => {
+  const saveProperty = async (draft: PropertyDraft, ownerDrafts: PropertyOwnerDraft[], renterDraft: PropertyRenterDraft | null, inlineUnits: UnitSavePayload[]) => {
     const current = formProperty;
     const currentUnits = current ? units.filter((unit) => unit.property_id === current.id) : [];
     if (current && current.property_type !== draft.property_type && currentUnits.length > 0) {
@@ -360,10 +361,17 @@ export default function PropertiesPage() {
     if (saveResult.error) throw new Error(saveResult.error.message);
     const saved = saveResult.data as Property;
     try {
-      await syncPropertyRelationships(saved.id, saved.property_type, ownerDrafts, renterDraft);
-    } catch (relationshipError) {
-      if (!current) await supabase.from('properties').delete().eq('id', saved.id);
-      throw relationshipError;
+      let contactCache = await syncPropertyRelationships(saved.id, saved.property_type, ownerDrafts, renterDraft);
+      for (const payload of inlineUnits) {
+        await saveUnit({ ...payload, draft: { ...payload.draft, property_id: saved.id } }, null, contactCache);
+      }
+    } catch (saveError) {
+      if (!current) {
+        await supabase.from('properties').delete().eq('id', saved.id);
+        setUnits((items) => items.filter((unit) => unit.property_id !== saved.id));
+        setRelationships((items) => items.filter((relationship) => relationship.property_id !== saved.id));
+      }
+      throw saveError;
     }
     setProperties((items) => current
       ? items.map((item) => item.id === saved.id ? saved : item).sort((a, b) => a.name.localeCompare(b.name))
@@ -372,13 +380,13 @@ export default function PropertiesPage() {
     setFeedback({ tone: 'success', message: current ? 'Property changes saved.' : 'Property added.' });
   };
 
-  const saveUnit = async (payload: UnitSavePayload, existingUnit: Unit | null) => {
+  const saveUnit = async (payload: UnitSavePayload, existingUnit: Unit | null, contactCache?: Contact[]) => {
     const unitResult = existingUnit
       ? await supabase.from('units').update(payload.draft).eq('id', existingUnit.id).select().single()
       : await supabase.from('units').insert([payload.draft]).select().single();
     if (unitResult.error) throw new Error(unitResult.error.message);
     const savedUnit = unitResult.data as Unit;
-    const resolvedContacts = [...contacts];
+    const resolvedContacts = contactCache ?? [...contacts];
     try {
       const rows: Array<Record<string, unknown>> = [];
       if (payload.draft.unit_type === 'house') {
@@ -417,7 +425,7 @@ export default function PropertiesPage() {
         ? await supabase.from('contact_property_relationships').insert(rows).select(ownerRelationshipSelect)
         : { data: [], error: null };
       if (insertError) throw new Error(`Unable to save unit contacts: ${insertError.message}`);
-      setContacts(resolvedContacts);
+      setContacts([...resolvedContacts]);
       setUnits((current) => {
         const next = existingUnit ? current.map((item) => item.id === savedUnit.id ? savedUnit : item) : [...current, savedUnit];
         return next.sort((a, b) => a.unit_number.localeCompare(b.unit_number, undefined, { numeric: true }));
@@ -483,8 +491,8 @@ export default function PropertiesPage() {
           {!loading && !error && filtered.length > 0 && <div data-testid="list-properties" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3"><AnimatePresence mode="popLayout">{filtered.map((property) => <PropertyCard key={property.id} property={property} units={units} contacts={contacts} relationships={relationships} onOpen={() => setProfileProperty(property)} onUnitSave={saveUnit} onUnitDelete={deleteUnit} />)}</AnimatePresence></div>}
         </div>
       </div>
-      <AnimatePresence>{formProperty !== undefined && <PropertySetupForm key={formProperty?.id ?? 'new'} property={formProperty} contacts={contacts} initialOwners={formOwners} initialRenter={formRenter} onSave={saveProperty} onClose={() => setFormProperty(undefined)} />}</AnimatePresence>
-      {profileProperty && !deleteOpen && <PropertyProfileModal property={profileProperty} contacts={contacts} ownerships={relationships} onClose={() => setProfileProperty(null)} onEdit={() => { setFormProperty(profileProperty); setProfileProperty(null); }} onDelete={() => setDeleteOpen(true)} />}
+      <AnimatePresence>{formProperty !== undefined && <PropertySetupForm key={formProperty?.id ?? 'new'} property={formProperty} contacts={contacts} initialOwners={formOwners} initialRenter={formRenter} existingUnits={units} onSave={saveProperty} onClose={() => setFormProperty(undefined)} />}</AnimatePresence>
+      {profileProperty && !deleteOpen && <PropertyProfileModal property={profileProperty} contacts={contacts} ownerships={relationships} units={units} onClose={() => setProfileProperty(null)} onEdit={() => { setFormProperty(profileProperty); setProfileProperty(null); }} onDelete={() => setDeleteOpen(true)} />}
       <AnimatePresence>{deleteOpen && profileProperty && <ConfirmDelete name={profileProperty.name} deleting={deleting} onCancel={() => setDeleteOpen(false)} onConfirm={() => void deleteProperty()} />}</AnimatePresence>
     </div>
   </AppLayout>;

@@ -104,7 +104,7 @@ function ContactEditor({
         ? contact.contact_type === 'company' || String(contact.id) === row.contact_id
         : contact.contact_type !== 'company' || String(contact.id) === row.contact_id;
     }
-    return ['tenant', 'former_tenant', 'other'].includes(contact.contact_type ?? '') || String(contact.id) === row.contact_id;
+    return true;
   });
   return <div>
     <div className="mb-2 flex rounded-[8px] bg-[#f2f1ed] p-1" role="group" aria-label={`${kind} contact source`}>
@@ -355,7 +355,7 @@ function UnitForm({
               <div className="space-y-3">{owners.map((owner, index) => <article key={owner.id ?? index} data-testid={`card-unit-owner-${index}`} className="rounded-[10px] border border-[#e7e4de] bg-white p-3">
                 <div className="mb-2 flex items-center justify-between"><p className="text-[11px] font-semibold text-[#45443d]">Owner {index + 1}</p>{owners.length > 1 && <button type="button" data-testid={`button-remove-unit-owner-${index}`} aria-label={`Remove owner ${index + 1}`} onClick={() => setOwners((current) => current.filter((_, i) => i !== index))} className="flex h-6 w-6 items-center justify-center rounded-full text-[#938e85] hover:bg-[#fbefed] hover:text-[#a33e34]"><Trash2 size={12} /></button>}</div>
                 <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-[150px_1fr]">
-                  <Field label="Owner type" required><FlowPointSelect testId={`select-unit-owner-${index}-type`} value={owner.entity_type} onChange={(value) => changeOwner(index, { entity_type: value as PropertyOwnerDraft['entity_type'], contact_id: '', source: 'existing' })} options={[{ value: 'individual', label: 'Individual' }, { value: 'company', label: 'Company' }]} /></Field>
+                  <Field label="Owner type" required><FlowPointSelect testId={`select-unit-owner-${index}-type`} value={owner.entity_type} onChange={(value) => changeOwner(index, { entity_type: value as PropertyOwnerDraft['entity_type'], contact_id: '', source: 'existing' })} placeholder="Choose owner type" options={[{ value: 'individual', label: 'Individual' }, { value: 'company', label: 'Company' }]} /></Field>
                   <Field label="Share" required><div className="relative"><input data-testid={`input-unit-owner-${index}-percentage`} className={`${inputClass} pr-8`} type="number" min="0.01" max="100" step="0.01" value={owner.ownership_percentage} onChange={(event) => changeOwner(index, { ownership_percentage: event.target.value })} placeholder="e.g. 50" /><span className="absolute right-3 top-3 text-[10px] text-[#929087]">%</span></div></Field>
                 </div>
                 <ContactEditor row={owner} index={index} kind="owner" contacts={contacts} entityType={owner.entity_type} onChange={(patch) => changeOwner(index, patch as Partial<PropertyOwnerDraft>)} />
@@ -377,7 +377,7 @@ function UnitForm({
             <FormError message={errors.renter} />
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Monthly rent (USD)" required><div className="relative"><span className="absolute left-3 top-3 text-[11px] text-[#89867e]">$</span><input data-testid="input-unit-monthly-rent" className={`${inputClass} pl-7`} type="number" min="0.01" step="0.01" value={renter.monthly_rent} onChange={(event) => changeRenter({ monthly_rent: event.target.value })} placeholder="2,450" /></div><FormError message={errors.monthly_rent} /></Field>
-              <Field label="Contract duration" required><FlowPointSelect testId="select-unit-lease-term" value={renter.lease_term_type} onChange={(value) => changeRenter({ lease_term_type: value as PropertyRenterDraft['lease_term_type'] })} options={[{ value: 'fixed', label: 'Fixed term' }, { value: 'until_termination', label: 'Until termination' }]} /></Field>
+              <Field label="Contract duration" required><FlowPointSelect testId="select-unit-lease-term" value={renter.lease_term_type} onChange={(value) => changeRenter({ lease_term_type: value as PropertyRenterDraft['lease_term_type'] })} placeholder="Choose duration" options={[{ value: 'fixed', label: 'Fixed term' }, { value: 'until_termination', label: 'Until termination' }]} /></Field>
               <Field label="Lease start date" required><input data-testid="input-unit-lease-start" className={inputClass} type="date" value={renter.lease_start_date} onChange={(event) => changeRenter({ lease_start_date: event.target.value })} /><FormError message={errors.lease_start_date} /></Field>
               {renter.lease_term_type === 'fixed' && <Field label="Lease end date" required><input data-testid="input-unit-lease-end" className={inputClass} type="date" min={renter.lease_start_date || undefined} value={renter.lease_end_date} onChange={(event) => changeRenter({ lease_end_date: event.target.value })} /><FormError message={errors.lease_end_date} /></Field>}
             </div>
@@ -412,6 +412,24 @@ function ConfirmUnitDelete({ unit, onCancel, onConfirm }: { unit: Unit; onCancel
       <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onCancel} disabled={deleting} className="h-8 rounded-[8px] border border-[#e4e2de] px-3 text-[10px] font-semibold text-[#625e57]">Cancel</button><button type="button" data-testid="button-confirm-delete-unit" onClick={remove} disabled={deleting} className="flex h-8 items-center gap-1.5 rounded-[8px] bg-[#b33d32] px-3 text-[10px] font-semibold text-white disabled:opacity-50">{deleting && <Loader2 size={11} className="animate-spin" />}Delete unit</button></div>
     </div>
   </div>;
+}
+
+export function UnitSetupModal({
+  property,
+  units,
+  contacts,
+  relationships,
+  onSave,
+  onClose,
+}: {
+  property: Property;
+  units: Unit[];
+  contacts: Contact[];
+  relationships: ContactPropertyRelationship[];
+  onSave: (payload: UnitSavePayload, existingUnit: Unit | null) => Promise<void>;
+  onClose: () => void;
+}) {
+  return <UnitForm property={property} unit={null} units={units} contacts={contacts} relationships={relationships} onSave={onSave} onClose={onClose} />;
 }
 
 export default function PropertyUnitManager({
